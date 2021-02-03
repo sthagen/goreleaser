@@ -72,8 +72,8 @@ images (and possibly others):
 ```dockerfile
 # Dockerfile
 FROM alpine
-COPY mybin /usr/bin/mybin
 ENTRYPOINT ["/usr/bin/mybin"]
+COPY mybin /usr/bin/mybin
 ```
 
 Then, on our GoReleaser config file, we need to define both the `dockers` and
@@ -93,15 +93,13 @@ builds:
 dockers:
 - image_templates:
   - "foo/bar:{{ .Version }}-amd64"
-  binaries:
-  - mybin
+  use_buildx: true
   dockerfile: Dockerfile
   build_flag_templates:
   - "--platform=linux/amd64"
 - image_templates:
   - "foo/bar:{{ .Version }}-arm64v8"
-  binaries:
-  - mybin
+  use_buildx: true
   goarch: arm64
   dockerfile: Dockerfile
   build_flag_templates:
