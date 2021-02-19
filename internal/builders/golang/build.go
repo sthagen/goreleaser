@@ -35,6 +35,9 @@ type Builder struct{}
 
 // WithDefaults sets the defaults for a golang build and returns it.
 func (*Builder) WithDefaults(build config.Build) (config.Build, error) {
+	if build.GoBinary == "" {
+		build.GoBinary = "go"
+	}
 	if build.Dir == "" {
 		build.Dir = "."
 	}
@@ -60,9 +63,6 @@ func (*Builder) WithDefaults(build config.Build) (config.Build, error) {
 			return build, err
 		}
 	}
-	if build.GoBinary == "" {
-		build.GoBinary = "go"
-	}
 	return build, nil
 }
 
@@ -76,9 +76,9 @@ func (*Builder) Build(ctx *context.Context, build config.Build, options api.Opti
 		return err
 	}
 
-	var cmd = []string{build.GoBinary, "build"}
+	cmd := []string{build.GoBinary, "build"}
 
-	var env = append(ctx.Env.Strings(), build.Env...)
+	env := append(ctx.Env.Strings(), build.Env...)
 	env = append(env, target.Env()...)
 
 	artifact := &artifact.Artifact{
@@ -171,8 +171,8 @@ func joinLdFlags(flags []string) string {
 
 func run(ctx *context.Context, command, env []string, dir string) error {
 	/* #nosec */
-	var cmd = exec.CommandContext(ctx, command[0], command[1:]...)
-	var log = log.WithField("env", env).WithField("cmd", command)
+	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
+	log := log.WithField("env", env).WithField("cmd", command)
 	cmd.Env = env
 	cmd.Dir = dir
 	log.Debug("running")
@@ -188,7 +188,7 @@ type buildTarget struct {
 }
 
 func newBuildTarget(s string) (buildTarget, error) {
-	var t = buildTarget{}
+	t := buildTarget{}
 	parts := strings.Split(s, "_")
 	if len(parts) < 2 {
 		return t, fmt.Errorf("%s is not a valid build target", s)
@@ -215,7 +215,7 @@ func (b buildTarget) Env() []string {
 }
 
 func checkMain(build config.Build) error {
-	var main = build.Main
+	main := build.Main
 	if main == "" {
 		main = "."
 	}
@@ -227,7 +227,7 @@ func checkMain(build config.Build) error {
 		return ferr
 	}
 	if stat.IsDir() {
-		packs, err := parser.ParseDir(token.NewFileSet(), main, fileFilter, 0)
+		packs, err := parser.ParseDir(token.NewFileSet(), main, nil, 0)
 		if err != nil {
 			return fmt.Errorf("failed to parse dir: %s: %w", main, err)
 		}
@@ -248,11 +248,6 @@ func checkMain(build config.Build) error {
 		return nil
 	}
 	return fmt.Errorf("build for %s does not contain a main function", build.Binary)
-}
-
-// TODO: can be removed once we migrate from go 1.15 to 1.16.
-func fileFilter(info os.FileInfo) bool {
-	return !info.IsDir()
 }
 
 func hasMain(file *ast.File) bool {

@@ -9,7 +9,8 @@ import (
 )
 
 func TestAllBuildTargets(t *testing.T) {
-	var build = config.Build{
+	build := config.Build{
+		GoBinary: "go",
 		Goos: []string{
 			"linux",
 			"darwin",
@@ -69,6 +70,7 @@ func TestAllBuildTargets(t *testing.T) {
 		"linux_mips64le_hardfloat",
 		"linux_riscv64",
 		"darwin_amd64",
+		"darwin_arm64",
 		"freebsd_386",
 		"freebsd_amd64",
 		"freebsd_arm_6",
@@ -82,7 +84,7 @@ func TestAllBuildTargets(t *testing.T) {
 }
 
 func TestGoosGoarchCombos(t *testing.T) {
-	var platforms = []struct {
+	platforms := []struct {
 		os    string
 		arch  string
 		valid bool
@@ -94,6 +96,7 @@ func TestGoosGoarchCombos(t *testing.T) {
 		{"android", "arm", true},
 		{"android", "arm64", true},
 		{"darwin", "amd64", true},
+		{"darwin", "arm64", true},
 		{"dragonfly", "amd64", true},
 		{"freebsd", "386", true},
 		{"freebsd", "amd64", true},
@@ -127,7 +130,6 @@ func TestGoosGoarchCombos(t *testing.T) {
 		// invalid targets
 		{"darwin", "386", false},
 		{"darwin", "arm", false},
-		{"darwin", "arm64", false},
 		{"windows", "arm", false},
 		{"windows", "arm64", false},
 		{"windows", "riscv64", false},
