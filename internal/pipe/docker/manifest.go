@@ -2,7 +2,7 @@ package docker
 
 import (
 	"fmt"
-	"os/exec"
+	"sort"
 	"strings"
 
 	"github.com/apex/log"
@@ -22,24 +22,51 @@ func (ManifestPipe) String() string {
 	return "docker manifests"
 }
 
+// Default sets the pipe defaults.
+func (ManifestPipe) Default(ctx *context.Context) error {
+	for i := range ctx.Config.DockerManifests {
+		manifest := &ctx.Config.DockerManifests[i]
+		if manifest.Use == "" {
+			manifest.Use = useDocker
+		}
+		if err := validateManifester(manifest.Use); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Publish the docker manifests.
 func (ManifestPipe) Publish(ctx *context.Context) error {
 	if ctx.SkipPublish {
 		return pipe.ErrSkipPublishEnabled
 	}
-	var g = semerrgroup.NewSkipAware(semerrgroup.New(1))
+	g := semerrgroup.NewSkipAware(semerrgroup.New(1))
 	for _, manifest := range ctx.Config.DockerManifests {
 		manifest := manifest
 		g.Go(func() error {
+			if strings.TrimSpace(manifest.SkipPush) == "true" {
+				return pipe.Skip("docker_manifest.skip_push is set")
+			}
+
+			if strings.TrimSpace(manifest.SkipPush) == "auto" && ctx.Semver.Prerelease != "" {
+				return pipe.Skip("prerelease detected with 'auto' push, skipping docker manifest")
+			}
+
 			name, err := manifestName(ctx, manifest)
 			if err != nil {
 				return err
 			}
+
 			images, err := manifestImages(ctx, manifest)
 			if err != nil {
 				return err
 			}
-			if err := dockerManifestCreate(ctx, name, images, manifest.CreateFlags); err != nil {
+
+			manifester := manifesters[manifest.Use]
+
+			log.WithField("manifest", name).WithField("images", images).Info("creating docker manifest")
+			if err := manifester.Create(ctx, name, images, manifest.CreateFlags); err != nil {
 				return err
 			}
 			ctx.Artifacts.Add(&artifact.Artifact{
@@ -47,10 +74,26 @@ func (ManifestPipe) Publish(ctx *context.Context) error {
 				Name: name,
 				Path: name,
 			})
-			return dockerManifestPush(ctx, name, manifest.PushFlags)
+
+			log.WithField("manifest", name).Info("pushing docker manifest")
+			return manifester.Push(ctx, name, manifest.PushFlags)
 		})
 	}
 	return g.Wait()
+}
+
+func validateManifester(use string) error {
+	valid := make([]string, 0, len(manifesters))
+	for k := range manifesters {
+		valid = append(valid, k)
+	}
+	for _, s := range valid {
+		if s == use {
+			return nil
+		}
+	}
+	sort.Strings(valid)
+	return fmt.Errorf("docker manifest: invalid use: %s, valid options are %v", use, valid)
 }
 
 func manifestName(ctx *context.Context, manifest config.DockerManifest) (string, error) {
@@ -65,7 +108,7 @@ func manifestName(ctx *context.Context, manifest config.DockerManifest) (string,
 }
 
 func manifestImages(ctx *context.Context, manifest config.DockerManifest) ([]string, error) {
-	var imgs = make([]string, 0, len(manifest.ImageTemplates))
+	imgs := make([]string, 0, len(manifest.ImageTemplates))
 	for _, img := range manifest.ImageTemplates {
 		str, err := tmpl.New(ctx).Apply(img)
 		if err != nil {
@@ -77,37 +120,4 @@ func manifestImages(ctx *context.Context, manifest config.DockerManifest) ([]str
 		return imgs, pipe.Skip("manifest has no images")
 	}
 	return imgs, nil
-}
-
-func dockerManifestCreate(ctx *context.Context, manifest string, images, flags []string) error {
-	log.WithField("manifest", manifest).WithField("images", images).Info("creating docker manifest")
-	var args = []string{"manifest", "create", manifest}
-	for _, img := range images {
-		args = append(args, "--amend", img)
-	}
-	args = append(args, flags...)
-	/* #nosec */
-	var cmd = exec.CommandContext(ctx, "docker", args...)
-	log.WithField("cmd", cmd.Args).WithField("cwd", cmd.Dir).Debug("running")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to create docker manifest: %s: \n%s: %w", manifest, string(out), err)
-	}
-	log.Debugf("docker manifest output: \n%s", string(out))
-	return nil
-}
-
-func dockerManifestPush(ctx *context.Context, manifest string, flags []string) error {
-	log.WithField("manifest", manifest).Info("pushing docker manifest")
-	var args = []string{"manifest", "push", manifest}
-	args = append(args, flags...)
-	/* #nosec */
-	var cmd = exec.CommandContext(ctx, "docker", args...)
-	log.WithField("cmd", cmd.Args).WithField("cwd", cmd.Dir).Debug("running")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to push docker manifest: %s: \n%s: %w", manifest, string(out), err)
-	}
-	log.Debugf("docker manifest output: \n%s", string(out))
-	return nil
 }

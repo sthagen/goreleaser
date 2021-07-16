@@ -1,46 +1,44 @@
 package deprecate
 
 import (
-	"flag"
-	"io/ioutil"
+	"bytes"
 	"testing"
 
 	"github.com/apex/log"
 	"github.com/apex/log/handlers/cli"
 	"github.com/fatih/color"
+	"github.com/goreleaser/goreleaser/internal/golden"
 	"github.com/goreleaser/goreleaser/pkg/config"
 	"github.com/goreleaser/goreleaser/pkg/context"
 	"github.com/stretchr/testify/require"
 )
 
-var update = flag.Bool("update", false, "update .golden files")
-
 func TestNotice(t *testing.T) {
-	f, err := ioutil.TempFile(t.TempDir(), "output.txt")
-	require.NoError(t, err)
-	t.Cleanup(func() { f.Close() })
+	var w bytes.Buffer
 
 	color.NoColor = true
-	log.SetHandler(cli.New(f))
+	log.SetHandler(cli.New(&w))
 
 	log.Info("first")
-	var ctx = context.New(config.Project{})
+	ctx := context.New(config.Project{})
 	Notice(ctx, "foo.bar.whatever")
 	log.Info("last")
 	require.True(t, ctx.Deprecated)
 
-	require.NoError(t, f.Close())
+	golden.RequireEqualTxt(t, w.Bytes())
+}
 
-	bts, err := ioutil.ReadFile(f.Name())
-	require.NoError(t, err)
+func TestNoticeCustom(t *testing.T) {
+	var w bytes.Buffer
 
-	const golden = "testdata/output.txt.golden"
-	if *update {
-		require.NoError(t, ioutil.WriteFile(golden, bts, 0655))
-	}
+	color.NoColor = true
+	log.SetHandler(cli.New(&w))
 
-	gbts, err := ioutil.ReadFile(golden)
-	require.NoError(t, err)
+	log.Info("first")
+	ctx := context.New(config.Project{})
+	NoticeCustom(ctx, "something-else", "some custom template with a url {{ .URL }}")
+	log.Info("last")
+	require.True(t, ctx.Deprecated)
 
-	require.Equal(t, string(gbts), string(bts))
+	golden.RequireEqualTxt(t, w.Bytes())
 }

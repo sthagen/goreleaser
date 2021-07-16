@@ -5,6 +5,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -64,7 +67,7 @@ func (Pipe) Default(ctx *context.Context) error {
 func doRun(ctx *context.Context, cl client.Client) error {
 	scoop := ctx.Config.Scoop
 	if scoop.Bucket.Name == "" {
-		return pipe.Skip("scoop section is not configured")
+		return pipe.ErrSkipDisabledPipe
 	}
 
 	if scoop.Bucket.Token != "" {
@@ -85,7 +88,7 @@ func doRun(ctx *context.Context, cl client.Client) error {
 		return pipe.Skip("archive format is binary")
 	}
 
-	var archives = ctx.Artifacts.Filter(
+	archives := ctx.Artifacts.Filter(
 		artifact.And(
 			artifact.ByGoos("windows"),
 			artifact.ByType(artifact.UploadableArchive),
@@ -95,7 +98,7 @@ func doRun(ctx *context.Context, cl client.Client) error {
 		return ErrNoWindows
 	}
 
-	var path = scoop.Name + ".json"
+	filename := scoop.Name + ".json"
 
 	data, err := dataFor(ctx, cl, archives)
 	if err != nil {
@@ -106,11 +109,17 @@ func doRun(ctx *context.Context, cl client.Client) error {
 		return err
 	}
 
-	if ctx.SkipPublish {
-		return pipe.ErrSkipPublishEnabled
+	distPath := filepath.Join(ctx.Config.Dist, filename)
+	log.WithField("manifest", distPath).Info("writing")
+	if err := os.WriteFile(distPath, content.Bytes(), 0o644); err != nil {
+		return fmt.Errorf("failed to write scoop manifest: %w", err)
 	}
+
 	if strings.TrimSpace(scoop.SkipUpload) == "true" {
 		return pipe.Skip("scoop.skip_upload is true")
+	}
+	if ctx.SkipPublish {
+		return pipe.ErrSkipPublishEnabled
 	}
 	if strings.TrimSpace(scoop.SkipUpload) == "auto" && ctx.Semver.Prerelease != "" {
 		return pipe.Skip("release is prerelease")
@@ -134,7 +143,7 @@ func doRun(ctx *context.Context, cl client.Client) error {
 		scoop.CommitAuthor,
 		repo,
 		content.Bytes(),
-		path,
+		path.Join(scoop.Folder, filename),
 		commitMessage,
 	)
 }
@@ -170,7 +179,7 @@ func doBuildManifest(manifest Manifest) (bytes.Buffer, error) {
 }
 
 func dataFor(ctx *context.Context, cl client.Client, artifacts []*artifact.Artifact) (Manifest, error) {
-	var manifest = Manifest{
+	manifest := Manifest{
 		Version:      ctx.Version,
 		Architecture: map[string]Resource{},
 		Homepage:     ctx.Config.Scoop.Homepage,
@@ -193,9 +202,18 @@ func dataFor(ctx *context.Context, cl client.Client, artifacts []*artifact.Artif
 	}
 
 	for _, artifact := range artifacts {
-		var arch = "64bit"
-		if artifact.Goarch == "386" {
+		if artifact.Goos != "windows" {
+			continue
+		}
+
+		var arch string
+		switch {
+		case artifact.Goarch == "386":
 			arch = "32bit"
+		case artifact.Goarch == "amd64":
+			arch = "64bit"
+		default:
+			continue
 		}
 
 		url, err := tmpl.New(ctx).
@@ -230,7 +248,7 @@ func dataFor(ctx *context.Context, cl client.Client, artifacts []*artifact.Artif
 func binaries(a *artifact.Artifact) []string {
 	// nolint: prealloc
 	var bins []string
-	var wrap = a.ExtraOr("WrappedIn", "").(string)
+	wrap := a.ExtraOr("WrappedIn", "").(string)
 	for _, b := range a.ExtraOr("Builds", []*artifact.Artifact{}).([]*artifact.Artifact) {
 		bins = append(bins, filepath.Join(wrap, b.Name))
 	}

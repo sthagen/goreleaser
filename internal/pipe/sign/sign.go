@@ -28,7 +28,7 @@ func (Pipe) String() string {
 
 // Default sets the Pipes defaults.
 func (Pipe) Default(ctx *context.Context) error {
-	var ids = ids.New("signs")
+	ids := ids.New("signs")
 	for i := range ctx.Config.Signs {
 		cfg := &ctx.Config.Signs[i]
 		if cfg.Cmd == "" {
@@ -57,7 +57,7 @@ func (Pipe) Run(ctx *context.Context) error {
 		return pipe.ErrSkipSignEnabled
 	}
 
-	var g = semerrgroup.New(ctx.Parallelism)
+	g := semerrgroup.New(ctx.Parallelism)
 	for i := range ctx.Config.Signs {
 		cfg := ctx.Config.Signs[i]
 		g.Go(func() error {
@@ -81,13 +81,20 @@ func (Pipe) Run(ctx *context.Context) error {
 					artifact.ByType(artifact.Checksum),
 					artifact.ByType(artifact.LinuxPackage),
 				))
-				if len(cfg.IDs) > 0 {
-					filters = append(filters, artifact.ByIDs(cfg.IDs...))
-				}
+			case "archive":
+				filters = append(filters, artifact.ByType(artifact.UploadableArchive))
+			case "binary":
+				filters = append(filters, artifact.ByType(artifact.UploadableBinary))
+			case "package":
+				filters = append(filters, artifact.ByType(artifact.LinuxPackage))
 			case "none":
 				return pipe.ErrSkipSignEnabled
 			default:
 				return fmt.Errorf("invalid list of artifacts to sign: %s", cfg.Artifacts)
+			}
+
+			if len(cfg.IDs) > 0 {
+				filters = append(filters, artifact.ByIDs(cfg.IDs...))
 			}
 			return sign(ctx, cfg, ctx.Artifacts.Filter(artifact.And(filters...)).List())
 		})
@@ -109,13 +116,17 @@ func sign(ctx *context.Context, cfg config.Sign, artifacts []*artifact.Artifact)
 func signone(ctx *context.Context, cfg config.Sign, a *artifact.Artifact) (*artifact.Artifact, error) {
 	env := ctx.Env.Copy()
 	env["artifact"] = a.Path
-	env["signature"] = expand(cfg.Signature, env)
+
+	name, err := tmpl.New(ctx).WithEnv(env).Apply(expand(cfg.Signature, env))
+	if err != nil {
+		return nil, fmt.Errorf("sign failed: %s: invalid template: %w", a, err)
+	}
+	env["signature"] = name
 
 	// nolint:prealloc
 	var args []string
 	for _, a := range cfg.Args {
-		var arg = expand(a, env)
-		arg, err := tmpl.New(ctx).WithEnv(env).Apply(arg)
+		arg, err := tmpl.New(ctx).WithEnv(env).Apply(expand(a, env))
 		if err != nil {
 			return nil, fmt.Errorf("sign failed: %s: invalid template: %w", a, err)
 		}
@@ -153,7 +164,10 @@ func signone(ctx *context.Context, cfg config.Sign, a *artifact.Artifact) (*arti
 	artifactPathBase, _ := filepath.Split(a.Path)
 
 	env["artifact"] = a.Name
-	name := expand(cfg.Signature, env)
+	name, err = tmpl.New(ctx).WithEnv(env).Apply(expand(cfg.Signature, env))
+	if err != nil {
+		return nil, fmt.Errorf("sign failed: %s: invalid template: %w", a, err)
+	}
 
 	sigFilename := filepath.Base(env["signature"])
 	return &artifact.Artifact{

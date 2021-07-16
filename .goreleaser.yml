@@ -1,10 +1,11 @@
 env:
   - GO111MODULE=on
-  - GOPROXY=https://gocenter.io
 before:
   hooks:
-    - go mod download
+    - go mod tidy
     - ./scripts/completions.sh
+gomod:
+  proxy: true
 builds:
 - env:
     - CGO_ENABLED=0
@@ -38,7 +39,7 @@ dockers:
   - 'goreleaser/goreleaser:{{ .Tag }}-amd64'
   - 'ghcr.io/goreleaser/goreleaser:{{ .Tag }}-amd64'
   dockerfile: Dockerfile
-  use_buildx: true
+  use: buildx
   build_flag_templates:
   - "--pull"
   - "--label=org.opencontainers.image.created={{.Date}}"
@@ -53,7 +54,7 @@ dockers:
   - 'goreleaser/goreleaser:{{ .Tag }}-arm64'
   - 'ghcr.io/goreleaser/goreleaser:{{ .Tag }}-arm64'
   dockerfile: Dockerfile
-  use_buildx: true
+  use: buildx
   build_flag_templates:
   - "--pull"
   - "--label=org.opencontainers.image.created={{.Date}}"
@@ -109,6 +110,8 @@ brews:
       system "#{bin}/goreleaser -v"
     dependencies:
     - name: go
+      type: optional
+    - name: git
     install: |-
       bin.install "goreleaser"
       bash_completion.install "completions/goreleaser.bash" => "goreleaser"
@@ -123,6 +126,7 @@ scoop:
   license: MIT
 nfpms:
   - file_name_template: '{{ .ProjectName }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}'
+    id: packages
     homepage:  https://goreleaser.com
     description: Deliver Go binaries as fast and easily as possible
     maintainer: Carlos Alexandro Becker <root@carlosbecker.com>
@@ -153,3 +157,23 @@ snapcrafts:
     grade: stable
     confinement: classic
     publish: true
+
+publishers:
+  - name: fury.io
+    ids:
+    - packages
+    env:
+    - 'FURY_TOKEN={{ .Env.FURY_TOKEN }}'
+    cmd: ./scripts/fury-upload.sh {{ .ArtifactName }}
+
+release:
+  discussion_category_name: Announcements
+  footer: |
+    ---
+
+    __Check out [GoReleaser Pro](https://goreleaser.com/pro) as well!__
+
+announce:
+  twitter:
+    enabled: true
+    message_template: 'GoReleaser {{ .Tag }} was just released! Get it while its fresh: https://github.com/goreleaser/goreleaser/releases/tag/{{ .Tag }}'

@@ -8,6 +8,7 @@ import (
 	"github.com/caarlos0/ctrlc"
 	"github.com/fatih/color"
 	"github.com/goreleaser/goreleaser/internal/middleware"
+	"github.com/goreleaser/goreleaser/internal/pipe/git"
 	"github.com/goreleaser/goreleaser/internal/pipeline"
 	"github.com/goreleaser/goreleaser/pkg/context"
 	"github.com/spf13/cobra"
@@ -19,24 +20,29 @@ type releaseCmd struct {
 }
 
 type releaseOpts struct {
-	config        string
-	releaseNotes  string
-	releaseHeader string
-	releaseFooter string
-	snapshot      bool
-	skipPublish   bool
-	skipSign      bool
-	skipValidate  bool
-	rmDist        bool
-	deprecated    bool
-	parallelism   int
-	timeout       time.Duration
+	config            string
+	releaseNotesFile  string
+	releaseNotesTmpl  string
+	releaseHeaderFile string
+	releaseHeaderTmpl string
+	releaseFooterFile string
+	releaseFooterTmpl string
+	autoSnapshot      bool
+	snapshot          bool
+	skipPublish       bool
+	skipSign          bool
+	skipValidate      bool
+	skipAnnounce      bool
+	rmDist            bool
+	deprecated        bool
+	parallelism       int
+	timeout           time.Duration
 }
 
 func newReleaseCmd() *releaseCmd {
-	var root = &releaseCmd{}
+	root := &releaseCmd{}
 	// nolint: dupl
-	var cmd = &cobra.Command{
+	cmd := &cobra.Command{
 		Use:           "release",
 		Aliases:       []string{"r"},
 		Short:         "Releases the current project",
@@ -63,15 +69,20 @@ func newReleaseCmd() *releaseCmd {
 	}
 
 	cmd.Flags().StringVarP(&root.opts.config, "config", "f", "", "Load configuration from file")
-	cmd.Flags().StringVar(&root.opts.releaseNotes, "release-notes", "", "Load custom release notes from a markdown file")
-	cmd.Flags().StringVar(&root.opts.releaseHeader, "release-header", "", "Load custom release notes header from a markdown file")
-	cmd.Flags().StringVar(&root.opts.releaseFooter, "release-footer", "", "Load custom release notes footer from a markdown file")
-	cmd.Flags().BoolVar(&root.opts.snapshot, "snapshot", false, "Generate an unversioned snapshot release, skipping all validations and without publishing any artifacts")
+	cmd.Flags().StringVar(&root.opts.releaseNotesFile, "release-notes", "", "Load custom release notes from a markdown file")
+	cmd.Flags().StringVar(&root.opts.releaseHeaderFile, "release-header", "", "Load custom release notes header from a markdown file")
+	cmd.Flags().StringVar(&root.opts.releaseFooterFile, "release-footer", "", "Load custom release notes footer from a markdown file")
+	cmd.Flags().StringVar(&root.opts.releaseNotesTmpl, "release-notes-tmpl", "", "Load custom release notes from a templated markdown file (overrides --release-notes)")
+	cmd.Flags().StringVar(&root.opts.releaseHeaderTmpl, "release-header-tmpl", "", "Load custom release notes header from a templated markdown file (overrides --release-header)")
+	cmd.Flags().StringVar(&root.opts.releaseFooterTmpl, "release-footer-tmpl", "", "Load custom release notes footer from a templated markdown file (overrides --release-footer)")
+	cmd.Flags().BoolVar(&root.opts.autoSnapshot, "auto-snapshot", false, "Automatically sets --snapshot if the repo is dirty")
+	cmd.Flags().BoolVar(&root.opts.snapshot, "snapshot", false, "Generate an unversioned snapshot release, skipping all validations and without publishing any artifacts (implies --skip-publish, --skip-announce and --skip-validate)")
 	cmd.Flags().BoolVar(&root.opts.skipPublish, "skip-publish", false, "Skips publishing artifacts")
+	cmd.Flags().BoolVar(&root.opts.skipAnnounce, "skip-announce", false, "Skips announcing releases (implies --skip-validate)")
 	cmd.Flags().BoolVar(&root.opts.skipSign, "skip-sign", false, "Skips signing the artifacts")
 	cmd.Flags().BoolVar(&root.opts.skipValidate, "skip-validate", false, "Skips several sanity checks")
 	cmd.Flags().BoolVar(&root.opts.rmDist, "rm-dist", false, "Remove the dist folder before building")
-	cmd.Flags().IntVarP(&root.opts.parallelism, "parallelism", "p", runtime.NumCPU(), "Amount tasks to run concurrently")
+	cmd.Flags().IntVarP(&root.opts.parallelism, "parallelism", "p", 0, "Amount tasks to run concurrently (default: number of CPUs)")
 	cmd.Flags().DurationVar(&root.opts.timeout, "timeout", 30*time.Minute, "Timeout to the entire release process")
 	cmd.Flags().BoolVar(&root.opts.deprecated, "deprecated", false, "Force print the deprecation message - tests only")
 	_ = cmd.Flags().MarkHidden("deprecated")
@@ -103,13 +114,24 @@ func releaseProject(options releaseOpts) (*context.Context, error) {
 }
 
 func setupReleaseContext(ctx *context.Context, options releaseOpts) *context.Context {
-	ctx.Parallelism = options.parallelism
+	ctx.Parallelism = runtime.NumCPU()
+	if options.parallelism > 0 {
+		ctx.Parallelism = options.parallelism
+	}
 	log.Debugf("parallelism: %v", ctx.Parallelism)
-	ctx.ReleaseNotes = options.releaseNotes
-	ctx.ReleaseHeader = options.releaseHeader
-	ctx.ReleaseFooter = options.releaseFooter
+	ctx.ReleaseNotesFile = options.releaseNotesFile
+	ctx.ReleaseNotesTmpl = options.releaseNotesTmpl
+	ctx.ReleaseHeaderFile = options.releaseHeaderFile
+	ctx.ReleaseHeaderTmpl = options.releaseHeaderTmpl
+	ctx.ReleaseFooterFile = options.releaseFooterFile
+	ctx.ReleaseFooterTmpl = options.releaseFooterTmpl
 	ctx.Snapshot = options.snapshot
+	if options.autoSnapshot && git.CheckDirty() != nil {
+		log.Info("git repo is dirty and --auto-snapshot is set, implying --snapshot")
+		ctx.Snapshot = true
+	}
 	ctx.SkipPublish = ctx.Snapshot || options.skipPublish
+	ctx.SkipAnnounce = ctx.Snapshot || options.skipPublish || options.skipAnnounce
 	ctx.SkipValidate = ctx.Snapshot || options.skipValidate
 	ctx.SkipSign = options.skipSign
 	ctx.RmDist = options.rmDist

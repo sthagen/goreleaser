@@ -4,7 +4,6 @@ package changelog
 import (
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -30,23 +29,14 @@ func (Pipe) String() string {
 
 // Run the pipe.
 func (Pipe) Run(ctx *context.Context) error {
-	// TODO: should probably have a different field for the filename and its
-	// contents.
-	if ctx.ReleaseNotes != "" {
-		notes, err := loadFromFile(ctx.ReleaseNotes)
-		if err != nil {
-			return err
-		}
-		notes, err = tmpl.New(ctx).Apply(notes)
-		if err != nil {
-			return err
-		}
-		log.WithField("file", ctx.ReleaseNotes).Info("loaded custom release notes")
-		log.WithField("file", ctx.ReleaseNotes).Debugf("custom release notes: \n%s", notes)
-		ctx.ReleaseNotes = notes
+	notes, err := loadContent(ctx, ctx.ReleaseNotesFile, ctx.ReleaseNotesTmpl)
+	if err != nil {
+		return err
 	}
+	ctx.ReleaseNotes = notes
+
 	if ctx.Config.Changelog.Skip {
-		return pipe.Skip("changelog should not be built")
+		return pipe.ErrSkipDisabledPipe
 	}
 	if ctx.Snapshot {
 		return pipe.Skip("not available for snapshots")
@@ -54,27 +44,15 @@ func (Pipe) Run(ctx *context.Context) error {
 	if ctx.ReleaseNotes != "" {
 		return nil
 	}
-	if ctx.ReleaseHeader != "" {
-		header, err := loadFromFile(ctx.ReleaseHeader)
-		if err != nil {
-			return err
-		}
-		header, err = tmpl.New(ctx).Apply(header)
-		if err != nil {
-			return err
-		}
-		ctx.ReleaseHeader = header
+
+	footer, err := loadContent(ctx, ctx.ReleaseFooterFile, ctx.ReleaseFooterTmpl)
+	if err != nil {
+		return err
 	}
-	if ctx.ReleaseFooter != "" {
-		footer, err := loadFromFile(ctx.ReleaseFooter)
-		if err != nil {
-			return err
-		}
-		footer, err = tmpl.New(ctx).Apply(footer)
-		if err != nil {
-			return err
-		}
-		ctx.ReleaseFooter = footer
+
+	header, err := loadContent(ctx, ctx.ReleaseHeaderFile, ctx.ReleaseHeaderTmpl)
+	if err != nil {
+		return err
 	}
 
 	if err := checkSortDirection(ctx.Config.Changelog.Sort); err != nil {
@@ -98,11 +76,11 @@ func (Pipe) Run(ctx *context.Context) error {
 		"## Changelog",
 		strings.Join(entries, changelogStringJoiner),
 	}
-	if len(ctx.ReleaseHeader) > 0 {
-		changelogElements = append([]string{ctx.ReleaseHeader}, changelogElements...)
+	if header != "" {
+		changelogElements = append([]string{header}, changelogElements...)
 	}
-	if len(ctx.ReleaseFooter) > 0 {
-		changelogElements = append(changelogElements, ctx.ReleaseFooter)
+	if footer != "" {
+		changelogElements = append(changelogElements, footer)
 	}
 
 	ctx.ReleaseNotes = strings.Join(changelogElements, "\n\n")
@@ -110,13 +88,13 @@ func (Pipe) Run(ctx *context.Context) error {
 		ctx.ReleaseNotes += "\n"
 	}
 
-	var path = filepath.Join(ctx.Config.Dist, "CHANGELOG.md")
+	path := filepath.Join(ctx.Config.Dist, "CHANGELOG.md")
 	log.WithField("changelog", path).Info("writing")
-	return ioutil.WriteFile(path, []byte(ctx.ReleaseNotes), 0644) //nolint: gosec
+	return os.WriteFile(path, []byte(ctx.ReleaseNotes), 0o644) //nolint: gosec
 }
 
 func loadFromFile(file string) (string, error) {
-	bts, err := ioutil.ReadFile(file)
+	bts, err := os.ReadFile(file)
 	if err != nil {
 		return "", err
 	}
@@ -140,7 +118,7 @@ func buildChangelog(ctx *context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	var entries = strings.Split(log, "\n")
+	entries := strings.Split(log, "\n")
 	entries = entries[0 : len(entries)-1]
 	entries, err = filterEntries(ctx, entries)
 	if err != nil {
@@ -161,15 +139,15 @@ func filterEntries(ctx *context.Context, entries []string) ([]string, error) {
 }
 
 func sortEntries(ctx *context.Context, entries []string) []string {
-	var direction = ctx.Config.Changelog.Sort
+	direction := ctx.Config.Changelog.Sort
 	if direction == "" {
 		return entries
 	}
-	var result = make([]string, len(entries))
+	result := make([]string, len(entries))
 	copy(result, entries)
 	sort.Slice(result, func(i, j int) bool {
-		var imsg = extractCommitInfo(result[i])
-		var jmsg = extractCommitInfo(result[j])
+		imsg := extractCommitInfo(result[i])
+		jmsg := extractCommitInfo(result[j])
 		if direction == "asc" {
 			return strings.Compare(imsg, jmsg) < 0
 		}
@@ -203,7 +181,7 @@ func getChangelog(tag string) (string, error) {
 }
 
 func gitLog(refs ...string) (string, error) {
-	var args = []string{"log", "--pretty=oneline", "--abbrev-commit", "--no-decorate", "--no-color"}
+	args := []string{"log", "--pretty=oneline", "--abbrev-commit", "--no-decorate", "--no-color"}
 	args = append(args, refs...)
 	return git.Run(args...)
 }
@@ -225,4 +203,22 @@ var validSHA1 = regexp.MustCompile(`^[a-fA-F0-9]{40}$`)
 // isSHA1 te lets us know if the ref is a SHA1 or not.
 func isSHA1(ref string) bool {
 	return validSHA1.MatchString(ref)
+}
+
+func loadContent(ctx *context.Context, fileName, tmplName string) (string, error) {
+	if tmplName != "" {
+		log.Debugf("loading template %s", tmplName)
+		content, err := loadFromFile(tmplName)
+		if err != nil {
+			return "", err
+		}
+		return tmpl.New(ctx).Apply(content)
+	}
+
+	if fileName != "" {
+		log.Debugf("loading file %s", fileName)
+		return loadFromFile(fileName)
+	}
+
+	return "", nil
 }

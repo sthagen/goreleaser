@@ -1,15 +1,15 @@
 SOURCE_FILES?=./...
 TEST_PATTERN?=.
 TEST_OPTIONS?=
+DOCKER?=docker
 
 export PATH := ./bin:$(PATH)
 export GO111MODULE := on
 export GOPROXY = https://proxy.golang.org,direct
 
-# Install all the build and lint dependencies
+# Install dependencies
 setup:
-	go mod download
-	go generate -v ./...
+	go mod tidy
 .PHONY: setup
 
 # Run all the tests
@@ -24,17 +24,11 @@ cover: test
 
 # gofmt and goimports all go files
 fmt:
-	find . -name '*.go' -not -wholename './vendor/*' | while read -r file; do gofmt -w -s "$$file"; goimports -w "$$file"; done
+	gofumpt -w .
 .PHONY: fmt
 
-# Run all the linters
-lint:
-	golangci-lint run ./...
-	misspell -error **/*
-.PHONY: lint
-
 # Run all the tests and code checks
-ci: build test lint
+ci: build test
 .PHONY: ci
 
 # Build a beta version of goreleaser
@@ -51,7 +45,7 @@ imgs:
 .PHONY: imgs
 
 serve:
-	@docker run --rm -it -p 8000:8000 -v ${PWD}/www:/docs squidfunk/mkdocs-material
+	$(DOCKER) run --rm -it -p 8000:8000 -v ${PWD}/www:/docs docker.io/squidfunk/mkdocs-material
 .PHONY: serve
 
 vercel:

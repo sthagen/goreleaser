@@ -16,7 +16,6 @@ import (
 	"github.com/imdario/mergo"
 
 	"github.com/goreleaser/goreleaser/internal/artifact"
-	"github.com/goreleaser/goreleaser/internal/deprecate"
 	"github.com/goreleaser/goreleaser/internal/ids"
 	"github.com/goreleaser/goreleaser/internal/linux"
 	"github.com/goreleaser/goreleaser/internal/pipe"
@@ -26,7 +25,7 @@ import (
 	"github.com/goreleaser/goreleaser/pkg/context"
 )
 
-const defaultNameTemplate = "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}{{ if .Mips }}_{{ .Mips }}{{ end }}"
+const defaultNameTemplate = "{{ .PackageName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}{{ if .Mips }}_{{ .Mips }}{{ end }}"
 
 // Pipe for nfpm packaging.
 type Pipe struct{}
@@ -37,9 +36,9 @@ func (Pipe) String() string {
 
 // Default sets the pipe defaults.
 func (Pipe) Default(ctx *context.Context) error {
-	var ids = ids.New("nfpms")
+	ids := ids.New("nfpms")
 	for i := range ctx.Config.NFPMs {
-		var fpm = &ctx.Config.NFPMs[i]
+		fpm := &ctx.Config.NFPMs[i]
 		if fpm.ID == "" {
 			fpm.ID = "default"
 		}
@@ -52,62 +51,7 @@ func (Pipe) Default(ctx *context.Context) error {
 		if fpm.FileNameTemplate == "" {
 			fpm.FileNameTemplate = defaultNameTemplate
 		}
-		if len(fpm.Files) > 0 {
-			for src, dst := range fpm.Files {
-				fpm.Contents = append(fpm.Contents, &files.Content{
-					Source:      src,
-					Destination: dst,
-				})
-			}
-			deprecate.Notice(ctx, "nfpms.files")
-		}
-		if len(fpm.ConfigFiles) > 0 {
-			for src, dst := range fpm.ConfigFiles {
-				fpm.Contents = append(fpm.Contents, &files.Content{
-					Source:      src,
-					Destination: dst,
-					Type:        "config",
-				})
-			}
-			deprecate.Notice(ctx, "nfpms.config_files")
-		}
-		if len(fpm.Symlinks) > 0 {
-			for src, dst := range fpm.Symlinks {
-				fpm.Contents = append(fpm.Contents, &files.Content{
-					Source:      src,
-					Destination: dst,
-					Type:        "symlink",
-				})
-			}
-			deprecate.Notice(ctx, "nfpms.symlinks")
-		}
-		if len(fpm.RPM.GhostFiles) > 0 {
-			for _, dst := range fpm.RPM.GhostFiles {
-				fpm.Contents = append(fpm.Contents, &files.Content{
-					Destination: dst,
-					Type:        "ghost",
-					Packager:    "rpm",
-				})
-			}
-			deprecate.Notice(ctx, "nfpms.rpm.ghost_files")
-		}
-		if len(fpm.RPM.ConfigNoReplaceFiles) > 0 {
-			for src, dst := range fpm.RPM.ConfigNoReplaceFiles {
-				fpm.Contents = append(fpm.Contents, &files.Content{
-					Source:      src,
-					Destination: dst,
-					Type:        "config|noreplace",
-					Packager:    "rpm",
-				})
-			}
-			deprecate.Notice(ctx, "nfpms.rpm.config_noreplace_files")
-		}
-		if fpm.Deb.VersionMetadata != "" {
-			deprecate.Notice(ctx, "nfpms.deb.version_metadata")
-			fpm.VersionMetadata = fpm.Deb.VersionMetadata
-		}
-
-		if len(fpm.Builds) == 0 {
+		if len(fpm.Builds) == 0 { // TODO: change this to empty by default and deal with it in the filtering code
 			for _, b := range ctx.Config.Builds {
 				fpm.Builds = append(fpm.Builds, b.ID)
 			}
@@ -132,7 +76,7 @@ func (Pipe) Run(ctx *context.Context) error {
 }
 
 func doRun(ctx *context.Context, fpm config.NFPM) error {
-	var linuxBinaries = ctx.Artifacts.Filter(artifact.And(
+	linuxBinaries := ctx.Artifacts.Filter(artifact.And(
 		artifact.ByType(artifact.Binary),
 		artifact.ByGoos("linux"),
 		artifact.ByIDs(fpm.Builds...),
@@ -140,7 +84,7 @@ func doRun(ctx *context.Context, fpm config.NFPM) error {
 	if len(linuxBinaries) == 0 {
 		return fmt.Errorf("no linux binaries found for builds %v", fpm.Builds)
 	}
-	var g = semerrgroup.New(ctx.Parallelism)
+	g := semerrgroup.New(ctx.Parallelism)
 	for _, format := range fpm.Formats {
 		for platform, artifacts := range linuxBinaries {
 			format := format
@@ -174,36 +118,64 @@ func create(ctx *context.Context, fpm config.NFPM, format, arch string, binaries
 	if err != nil {
 		return err
 	}
-	name, err := tmpl.New(ctx).
+	tmpl := tmpl.New(ctx).
 		WithArtifact(binaries[0], overridden.Replacements).
 		WithExtraFields(tmpl.Fields{
-			"Release": fpm.Release,
-			"Epoch":   fpm.Epoch,
-		}).
-		Apply(overridden.FileNameTemplate)
+			"Release":     fpm.Release,
+			"Epoch":       fpm.Epoch,
+			"PackageName": fpm.PackageName,
+		})
+	name, err := tmpl.Apply(overridden.FileNameTemplate)
 	if err != nil {
 		return err
 	}
 
-	var contents = append(files.Contents{}, overridden.Contents...)
+	homepage, err := tmpl.Apply(fpm.Homepage)
+	if err != nil {
+		return err
+	}
+
+	description, err := tmpl.Apply(fpm.Description)
+	if err != nil {
+		return err
+	}
+
+	contents := files.Contents{}
+	for _, content := range overridden.Contents {
+		src, err := tmpl.Apply(content.Source)
+		if err != nil {
+			return err
+		}
+		dst, err := tmpl.Apply(content.Destination)
+		if err != nil {
+			return err
+		}
+		contents = append(contents, &files.Content{
+			Source:      src,
+			Destination: dst,
+			Type:        content.Type,
+			Packager:    content.Packager,
+			FileInfo:    content.FileInfo,
+		})
+	}
 
 	// FPM meta package should not contain binaries at all
 	if !fpm.Meta {
-		var log = log.WithField("package", name+"."+format).WithField("arch", arch)
+		log := log.WithField("package", name+"."+format).WithField("arch", arch)
 		for _, binary := range binaries {
 			src := binary.Path
-			dst := filepath.Join(fpm.Bindir, binary.Name)
+			dst := filepath.Join(fpm.Bindir, filepath.Base(binary.Name))
 			log.WithField("src", src).WithField("dst", dst).Debug("adding binary to package")
 			contents = append(contents, &files.Content{
-				Source:      src,
-				Destination: dst,
+				Source:      filepath.ToSlash(src),
+				Destination: filepath.ToSlash(dst),
 			})
 		}
 	}
 
 	log.WithField("files", destinations(contents)).Debug("all archive files")
 
-	var info = &nfpm.Info{
+	info := &nfpm.Info{
 		Arch:            arch,
 		Platform:        "linux",
 		Name:            fpm.PackageName,
@@ -215,9 +187,9 @@ func create(ctx *context.Context, fpm config.NFPM, format, arch string, binaries
 		Prerelease:      fpm.Prerelease,
 		VersionMetadata: fpm.VersionMetadata,
 		Maintainer:      fpm.Maintainer,
-		Description:     fpm.Description,
+		Description:     description,
 		Vendor:          fpm.Vendor,
-		Homepage:        fpm.Homepage,
+		Homepage:        homepage,
 		License:         fpm.License,
 		Overridables: nfpm.Overridables{
 			Conflicts:    overridden.Conflicts,
@@ -265,6 +237,10 @@ func create(ctx *context.Context, fpm config.NFPM, format, arch string, binaries
 						KeyPassphrase: getPassphraseFromEnv(ctx, "RPM", fpm.ID),
 					},
 				},
+				Scripts: nfpm.RPMScripts{
+					PreTrans:  overridden.RPM.Scripts.PreTrans,
+					PostTrans: overridden.RPM.Scripts.PostTrans,
+				},
 			},
 			APK: nfpm.APK{
 				Signature: nfpm.APKSignature{
@@ -273,6 +249,10 @@ func create(ctx *context.Context, fpm config.NFPM, format, arch string, binaries
 						KeyPassphrase: getPassphraseFromEnv(ctx, "APK", fpm.ID),
 					},
 					KeyName: overridden.APK.Signature.KeyName,
+				},
+				Scripts: nfpm.APKScripts{
+					PreUpgrade:  overridden.APK.Scripts.PreUpgrade,
+					PostUpgrade: overridden.APK.Scripts.PostUpgrade,
 				},
 			},
 		},
@@ -293,7 +273,7 @@ func create(ctx *context.Context, fpm config.NFPM, format, arch string, binaries
 		return err
 	}
 
-	var path = filepath.Join(ctx.Config.Dist, name+"."+format)
+	path := filepath.Join(ctx.Config.Dist, name+"."+format)
 	log.WithField("file", path).Info("creating")
 	w, err := os.Create(path)
 	if err != nil {
@@ -324,7 +304,7 @@ func create(ctx *context.Context, fpm config.NFPM, format, arch string, binaries
 }
 
 func destinations(contents files.Contents) []string {
-	var result = make([]string, 0, len(contents))
+	result := make([]string, 0, len(contents))
 	for _, f := range contents {
 		result = append(result, f.Destination)
 	}

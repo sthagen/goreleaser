@@ -2,11 +2,9 @@ package client
 
 import (
 	"crypto/tls"
-	"errors"
 	"fmt"
 	"net/http"
 	"os"
-	"strings"
 
 	"github.com/apex/log"
 	"github.com/goreleaser/goreleaser/internal/artifact"
@@ -17,9 +15,6 @@ import (
 )
 
 const DefaultGitLabDownloadURL = "https://gitlab.com"
-
-// ErrExtractHashFromFileUploadURL indicates the file upload hash could not ne extracted from the url.
-var ErrExtractHashFromFileUploadURL = errors.New("could not extract hash from gitlab file upload url")
 
 type gitlabClient struct {
 	client *gitlab.Client
@@ -34,7 +29,7 @@ func NewGitLab(ctx *context.Context, token string) (Client, error) {
 			InsecureSkipVerify: ctx.Config.GitLabURLs.SkipTLSVerify,
 		},
 	}
-	var options = []gitlab.ClientOptionFunc{
+	options := []gitlab.ClientOptionFunc{
 		gitlab.WithHTTPClient(&http.Client{
 			Transport: transport,
 		}),
@@ -52,7 +47,6 @@ func NewGitLab(ctx *context.Context, token string) (Client, error) {
 // CloseMilestone closes a given milestone.
 func (c *gitlabClient) CloseMilestone(ctx *context.Context, repo Repo, title string) error {
 	milestone, err := c.getMilestoneByTitle(repo, title)
-
 	if err != nil {
 		return err
 	}
@@ -197,21 +191,28 @@ func (c *gitlabClient) CreateRelease(ctx *context.Context, body string) (release
 	if err != nil {
 		return "", err
 	}
-
-	projectID := ctx.Config.Release.GitLab.Owner + "/" + ctx.Config.Release.GitLab.Name
+	gitlabName, err := tmpl.New(ctx).Apply(ctx.Config.Release.GitLab.Name)
+	if err != nil {
+		return "", err
+	}
+	projectID := gitlabName
+	if ctx.Config.Release.GitLab.Owner != "" {
+		projectID = ctx.Config.Release.GitLab.Owner + "/" + projectID
+	}
 	log.WithFields(log.Fields{
-		"owner": ctx.Config.Release.GitLab.Owner,
-		"name":  ctx.Config.Release.GitLab.Name,
+		"owner":     ctx.Config.Release.GitLab.Owner,
+		"name":      gitlabName,
+		"projectID": projectID,
 	}).Debug("projectID")
 
 	name := title
 	tagName := ctx.Git.CurrentTag
 	release, resp, err := c.client.Releases.GetRelease(projectID, tagName)
-	if err != nil && (resp == nil || resp.StatusCode != 403) {
+	if err != nil && (resp != nil && resp.StatusCode != 403 && resp.StatusCode != 404) {
 		return "", err
 	}
 
-	if resp.StatusCode == 403 {
+	if resp.StatusCode == 403 || resp.StatusCode == 404 {
 		log.WithFields(log.Fields{
 			"err": err.Error(),
 		}).Debug("get release")
@@ -264,12 +265,26 @@ func (c *gitlabClient) CreateRelease(ctx *context.Context, body string) (release
 }
 
 func (c *gitlabClient) ReleaseURLTemplate(ctx *context.Context) (string, error) {
-	return fmt.Sprintf(
-		"%s/%s/%s/uploads/{{ .ArtifactUploadHash }}/{{ .ArtifactName }}",
-		ctx.Config.GitLabURLs.Download,
-		ctx.Config.Release.GitLab.Owner,
-		ctx.Config.Release.GitLab.Name,
-	), nil
+	var urlTemplate string
+	gitlabName, err := tmpl.New(ctx).Apply(ctx.Config.Release.GitLab.Name)
+	if err != nil {
+		return "", err
+	}
+	if ctx.Config.Release.GitLab.Owner != "" {
+		urlTemplate = fmt.Sprintf(
+			"%s/%s/%s/-/releases/{{ .Tag }}/downloads/{{ .ArtifactName }}",
+			ctx.Config.GitLabURLs.Download,
+			ctx.Config.Release.GitLab.Owner,
+			gitlabName,
+		)
+	} else {
+		urlTemplate = fmt.Sprintf(
+			"%s/%s/-/releases/{{ .Tag }}/downloads/{{ .ArtifactName }}",
+			ctx.Config.GitLabURLs.Download,
+			gitlabName,
+		)
+	}
+	return urlTemplate, nil
 }
 
 // Upload uploads a file into a release repository.
@@ -279,7 +294,16 @@ func (c *gitlabClient) Upload(
 	artifact *artifact.Artifact,
 	file *os.File,
 ) error {
-	projectID := ctx.Config.Release.GitLab.Owner + "/" + ctx.Config.Release.GitLab.Name
+	// create new template and apply name field
+	gitlabName, err := tmpl.New(ctx).Apply(ctx.Config.Release.GitLab.Name)
+	if err != nil {
+		return err
+	}
+	projectID := gitlabName
+	// check if owner is empty
+	if ctx.Config.Release.GitLab.Owner != "" {
+		projectID = ctx.Config.Release.GitLab.Owner + "/" + projectID
+	}
 
 	log.WithField("file", file.Name()).Debug("uploading file")
 	projectFile, _, err := c.client.Projects.UploadFile(
@@ -287,7 +311,6 @@ func (c *gitlabClient) Upload(
 		file.Name(),
 		nil,
 	)
-
 	if err != nil {
 		return err
 	}
@@ -297,59 +320,39 @@ func (c *gitlabClient) Upload(
 		"url":  projectFile.URL,
 	}).Debug("uploaded file")
 
+	// search for project details based on projectID
+	projectDetails, _, err := c.client.Projects.GetProject(projectID, nil)
+	if err != nil {
+		return err
+	}
+
 	gitlabBaseURL := ctx.Config.GitLabURLs.Download
-	// projectFile.URL from upload: /uploads/<hash>/filename.txt
-	linkURL := gitlabBaseURL + "/" + projectID + projectFile.URL
+	linkURL := gitlabBaseURL + "/" + projectDetails.PathWithNamespace + projectFile.URL
 	name := artifact.Name
+	filename := "/" + name
 	releaseLink, _, err := c.client.ReleaseLinks.CreateReleaseLink(
 		projectID,
 		releaseID,
 		&gitlab.CreateReleaseLinkOptions{
-			Name: &name,
-			URL:  &linkURL,
+			Name:     &name,
+			URL:      &linkURL,
+			FilePath: &filename,
 		})
-
 	if err != nil {
 		return RetriableError{err}
 	}
 
 	log.WithFields(log.Fields{
 		"id":  releaseLink.ID,
-		"url": releaseLink.URL,
+		"url": releaseLink.DirectAssetURL,
 	}).Debug("created release link")
-
-	fileUploadHash, err := extractProjectFileHashFrom(projectFile.URL)
-	if err != nil {
-		return err
-	}
 
 	// for checksums.txt the field is nil, so we initialize it
 	if artifact.Extra == nil {
 		artifact.Extra = make(map[string]interface{})
 	}
-	// we set this hash to be able to download the file
-	// in following publish pipes like brew, scoop
-	artifact.Extra["ArtifactUploadHash"] = fileUploadHash
 
 	return nil
-}
-
-// extractProjectFileHashFrom extracts the hash from the
-// relative project file url of the format '/uploads/<hash>/filename.ext'.
-func extractProjectFileHashFrom(projectFileURL string) (string, error) {
-	log.WithField("projectFileURL", projectFileURL).Debug("extract file hash from")
-	splittedProjectFileURL := strings.Split(projectFileURL, "/")
-	if len(splittedProjectFileURL) != 4 {
-		log.WithField("projectFileURL", projectFileURL).Debug("could not extract file hash")
-		return "", ErrExtractHashFromFileUploadURL
-	}
-
-	fileHash := splittedProjectFileURL[2]
-	log.WithFields(log.Fields{
-		"projectFileURL": projectFileURL,
-		"fileHash":       fileHash,
-	}).Debug("extracted file hash")
-	return fileHash, nil
 }
 
 // getMilestoneByTitle returns a milestone by title.
@@ -360,7 +363,6 @@ func (c *gitlabClient) getMilestoneByTitle(repo Repo, title string) (*gitlab.Mil
 
 	for {
 		milestones, resp, err := c.client.Milestones.ListMilestones(repo.String(), opts)
-
 		if err != nil {
 			return nil, err
 		}

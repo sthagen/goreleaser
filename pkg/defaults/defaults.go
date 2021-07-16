@@ -12,6 +12,7 @@ import (
 	"github.com/goreleaser/goreleaser/internal/pipe/build"
 	"github.com/goreleaser/goreleaser/internal/pipe/checksums"
 	"github.com/goreleaser/goreleaser/internal/pipe/docker"
+	"github.com/goreleaser/goreleaser/internal/pipe/gomod"
 	"github.com/goreleaser/goreleaser/internal/pipe/milestone"
 	"github.com/goreleaser/goreleaser/internal/pipe/nfpm"
 	"github.com/goreleaser/goreleaser/internal/pipe/project"
@@ -21,6 +22,7 @@ import (
 	"github.com/goreleaser/goreleaser/internal/pipe/snapcraft"
 	"github.com/goreleaser/goreleaser/internal/pipe/snapshot"
 	"github.com/goreleaser/goreleaser/internal/pipe/sourcearchive"
+	"github.com/goreleaser/goreleaser/internal/pipe/twitter"
 	"github.com/goreleaser/goreleaser/pkg/context"
 )
 
@@ -39,6 +41,7 @@ var Defaulters = []Defaulter{
 	snapshot.Pipe{},
 	release.Pipe{},
 	project.Pipe{},
+	gomod.Pipe{},
 	build.Pipe{},
 	sourcearchive.Pipe{},
 	archive.Pipe{},
@@ -47,9 +50,11 @@ var Defaulters = []Defaulter{
 	checksums.Pipe{},
 	sign.Pipe{},
 	docker.Pipe{},
+	docker.ManifestPipe{},
 	artifactory.Pipe{},
 	blob.Pipe{},
 	brew.Pipe{},
 	scoop.Pipe{},
+	twitter.Pipe{},
 	milestone.Pipe{},
 }

@@ -21,7 +21,7 @@ nfpms:
     package_name: foo
 
     # You can change the file name of the package.
-    # Default: `{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}{{ if .Mips }}_{{ .Mips }}{{ end }}`
+    # Default: `{{ .PackageName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}{{ if .Mips }}_{{ .Mips }}{{ end }}`
     file_name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 
     # Build IDs for the builds you want to create NFPM packages for.
@@ -43,7 +43,8 @@ nfpms:
     # Your app's vendor.
     # Default is empty.
     vendor: Drum Roll Inc.
-    # Your app's homepage.
+
+    # Template to your app's homepage.
     # Default is empty.
     homepage: https://example.com/
 
@@ -51,7 +52,7 @@ nfpms:
     # Default is empty.
     maintainer: Drummer <drum-roll@example.com>
 
-    # Your app's description.
+    # Template to your app's description.
     # Default is empty.
     description: Software to create fast and easy drum rolls.
 
@@ -148,6 +149,10 @@ nfpms:
         dst: /etc/bar.conf
         type: "config|noreplace"
 
+      # The src and dst attributes also supports name templates
+      - src: path/{{ .Os }}-{{ .Arch }}/bar.conf
+        dst: /etc/foo/bar-{{ .ProjectName }}.conf
+
       # These files are not actually present in the package, but the file names
       # are added to the package header. From the RPM directives documentation:
       #
@@ -216,7 +221,7 @@ nfpms:
       rpm:
         replacements:
           amd64: x86_64
-        name_template: "{{ .ProjectName }}-{{ .Version }}-{{ .Arch }}"
+        file_name_template: "{{ .ProjectName }}-{{ .Version }}-{{ .Arch }}"
         files:
           "tmp/man.gz": "/usr/share/man/man8/app.8.gz"
         config_files:
@@ -224,8 +229,15 @@ nfpms:
         scripts:
           preinstall: "scripts/preinstall-rpm.sh"
 
-    # Custon configuration applied only to the RPM packager.
+    # Custom configuration applied only to the RPM packager.
     rpm:
+      # RPM specific scripts.
+      scripts:
+        # The pretrans script runs before all RPM package transactions / stages.
+        pretrans: ./scripts/pretrans.sh
+        # The posttrans script runs after all RPM package transactions / stages.
+        posttrans: ./scripts/posttrans.sh
+
       # The package summary.
       # Defaults to the first line of the description.
       summary: Explicit Summary for Sample Package
@@ -306,6 +318,13 @@ nfpms:
         type: origin
 
     apk:
+      # APK specific scripts.
+      scripts:
+        # The preupgrade script runs before APK upgrade.
+        preupgrade: ./scripts/preupgrade.sh
+        # The postupgrade script runs after APK.
+        postupgrade: ./scripts/postupgrade.sh
+
       # The package is signed if a key_file is set
       signature:
         # RSA private key in the PEM format. The passphrase is taken

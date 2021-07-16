@@ -4,7 +4,6 @@ package snapcraft
 import (
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -43,6 +42,7 @@ type Metadata struct {
 	Grade         string `yaml:",omitempty"`
 	Confinement   string `yaml:",omitempty"`
 	Architectures []string
+	Layout        map[string]LayoutMetadata `yaml:",omitempty"`
 	Apps          map[string]AppMetadata
 	Plugs         map[string]interface{} `yaml:",omitempty"`
 }
@@ -56,6 +56,13 @@ type AppMetadata struct {
 	RestartCondition string   `yaml:"restart-condition,omitempty"`
 }
 
+type LayoutMetadata struct {
+	Symlink  string `yaml:",omitempty"`
+	Bind     string `yaml:",omitempty"`
+	BindFile string `yaml:"bind-file,omitempty"`
+	Type     string `yaml:",omitempty"`
+}
+
 const defaultNameTemplate = "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}{{ if .Mips }}_{{ .Mips }}{{ end }}"
 
 // Pipe for snapcraft packaging.
@@ -67,9 +74,9 @@ func (Pipe) String() string {
 
 // Default sets the pipe defaults.
 func (Pipe) Default(ctx *context.Context) error {
-	var ids = ids.New("snapcrafts")
+	ids := ids.New("snapcrafts")
 	for i := range ctx.Config.Snapcrafts {
-		var snap = &ctx.Config.Snapcrafts[i]
+		snap := &ctx.Config.Snapcrafts[i]
 		if snap.NameTemplate == "" {
 			snap.NameTemplate = defaultNameTemplate
 		}
@@ -109,7 +116,7 @@ func doRun(ctx *context.Context, snap config.Snapcraft) error {
 		return ErrNoSnapcraft
 	}
 
-	var g = semerrgroup.New(ctx.Parallelism)
+	g := semerrgroup.New(ctx.Parallelism)
 	for platform, binaries := range ctx.Artifacts.Filter(
 		artifact.And(
 			artifact.ByGoos("linux"),
@@ -146,7 +153,7 @@ func (Pipe) Publish(ctx *context.Context) error {
 		return pipe.ErrSkipPublishEnabled
 	}
 	snaps := ctx.Artifacts.Filter(artifact.ByType(artifact.PublishableSnapcraft)).List()
-	var g = semerrgroup.New(ctx.Parallelism)
+	g := semerrgroup.New(ctx.Parallelism)
 	for _, snap := range snaps {
 		snap := snap
 		g.Go(func() error {
@@ -157,7 +164,7 @@ func (Pipe) Publish(ctx *context.Context) error {
 }
 
 func create(ctx *context.Context, snap config.Snapcraft, arch string, binaries []*artifact.Artifact) error {
-	var log = log.WithField("arch", arch)
+	log := log.WithField("arch", arch)
 	folder, err := tmpl.New(ctx).
 		WithArtifact(binaries[0], snap.Replacements).
 		Apply(snap.NameTemplate)
@@ -166,11 +173,11 @@ func create(ctx *context.Context, snap config.Snapcraft, arch string, binaries [
 	}
 
 	// prime is the directory that then will be compressed to make the .snap package.
-	var folderDir = filepath.Join(ctx.Config.Dist, folder)
-	var primeDir = filepath.Join(folderDir, "prime")
-	var metaDir = filepath.Join(primeDir, "meta")
+	folderDir := filepath.Join(ctx.Config.Dist, folder)
+	primeDir := filepath.Join(folderDir, "prime")
+	metaDir := filepath.Join(primeDir, "meta")
 	// #nosec
-	if err = os.MkdirAll(metaDir, 0755); err != nil {
+	if err = os.MkdirAll(metaDir, 0o755); err != nil {
 		return err
 	}
 
@@ -179,9 +186,9 @@ func create(ctx *context.Context, snap config.Snapcraft, arch string, binaries [
 			file.Destination = file.Source
 		}
 		if file.Mode == 0 {
-			file.Mode = 0644
+			file.Mode = 0o644
 		}
-		if err := os.MkdirAll(filepath.Join(primeDir, filepath.Dir(file.Destination)), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Join(primeDir, filepath.Dir(file.Destination)), 0o755); err != nil {
 			return fmt.Errorf("failed to link extra file '%s': %w", file.Source, err)
 		}
 		if err := link(file.Source, filepath.Join(primeDir, file.Destination), os.FileMode(file.Mode)); err != nil {
@@ -189,16 +196,17 @@ func create(ctx *context.Context, snap config.Snapcraft, arch string, binaries [
 		}
 	}
 
-	var file = filepath.Join(primeDir, "meta", "snap.yaml")
+	file := filepath.Join(primeDir, "meta", "snap.yaml")
 	log.WithField("file", file).Debug("creating snap metadata")
 
-	var metadata = &Metadata{
+	metadata := &Metadata{
 		Version:       ctx.Version,
 		Summary:       snap.Summary,
 		Description:   snap.Description,
 		Grade:         snap.Grade,
 		Confinement:   snap.Confinement,
 		Architectures: []string{arch},
+		Layout:        map[string]LayoutMetadata{},
 		Apps:          map[string]AppMetadata{},
 	}
 
@@ -215,15 +223,24 @@ func create(ctx *context.Context, snap config.Snapcraft, arch string, binaries [
 		metadata.Name = snap.Name
 	}
 
+	for targetPath, layout := range snap.Layout {
+		metadata.Layout[targetPath] = LayoutMetadata{
+			Symlink:  layout.Symlink,
+			Bind:     layout.Bind,
+			BindFile: layout.BindFile,
+			Type:     layout.Type,
+		}
+	}
+
 	// if the user didn't specify any apps then
 	// default to the main binary being the command:
 	if len(snap.Apps) == 0 {
-		var name = snap.Name
+		name := snap.Name
 		if name == "" {
-			name = binaries[0].Name
+			name = filepath.Base(binaries[0].Name)
 		}
 		metadata.Apps[name] = AppMetadata{
-			Command: filepath.Base(binaries[0].Name),
+			Command: filepath.Base(filepath.Base(binaries[0].Name)),
 		}
 	}
 
@@ -237,7 +254,7 @@ func create(ctx *context.Context, snap config.Snapcraft, arch string, binaries [
 		if err = os.Link(binary.Path, destBinaryPath); err != nil {
 			return fmt.Errorf("failed to link binary: %w", err)
 		}
-		if err := os.Chmod(destBinaryPath, 0555); err != nil {
+		if err := os.Chmod(destBinaryPath, 0o555); err != nil {
 			return fmt.Errorf("failed to change binary permissions: %w", err)
 		}
 	}
@@ -263,7 +280,7 @@ func create(ctx *context.Context, snap config.Snapcraft, arch string, binaries [
 
 		if config.Completer != "" {
 			destCompleterPath := filepath.Join(primeDir, config.Completer)
-			if err := os.MkdirAll(filepath.Dir(destCompleterPath), 0755); err != nil {
+			if err := os.MkdirAll(filepath.Dir(destCompleterPath), 0o755); err != nil {
 				return fmt.Errorf("failed to create folder: %w", err)
 			}
 			log.WithField("src", config.Completer).
@@ -272,7 +289,7 @@ func create(ctx *context.Context, snap config.Snapcraft, arch string, binaries [
 			if err := os.Link(config.Completer, destCompleterPath); err != nil {
 				return fmt.Errorf("failed to link completer: %w", err)
 			}
-			if err := os.Chmod(destCompleterPath, 0644); err != nil {
+			if err := os.Chmod(destCompleterPath, 0o644); err != nil {
 				return fmt.Errorf("failed to change completer permissions: %w", err)
 			}
 			appMetadata.Completer = config.Completer
@@ -288,14 +305,14 @@ func create(ctx *context.Context, snap config.Snapcraft, arch string, binaries [
 	}
 
 	log.WithField("file", file).Debugf("writing metadata file")
-	if err = ioutil.WriteFile(file, out, 0644); err != nil { //nolint: gosec
+	if err = os.WriteFile(file, out, 0o644); err != nil { //nolint: gosec
 		return err
 	}
 
-	var snapFile = filepath.Join(ctx.Config.Dist, folder+".snap")
+	snapFile := filepath.Join(ctx.Config.Dist, folder+".snap")
 	log.WithField("snap", snapFile).Info("creating")
 	/* #nosec */
-	var cmd = exec.CommandContext(ctx, "snapcraft", "pack", primeDir, "--output", snapFile)
+	cmd := exec.CommandContext(ctx, "snapcraft", "pack", primeDir, "--output", snapFile)
 	if out, err = cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to generate snap package: %s", string(out))
 	}
@@ -313,16 +330,20 @@ func create(ctx *context.Context, snap config.Snapcraft, arch string, binaries [
 	return nil
 }
 
-const reviewWaitMsg = `Waiting for previous upload(s) to complete their review process.`
+const (
+	reviewWaitMsg  = `Waiting for previous upload(s) to complete their review process.`
+	humanReviewMsg = `A human will soon review your snap`
+	needsReviewMsg = `(NEEDS REVIEW)`
+)
 
 func push(ctx *context.Context, snap *artifact.Artifact) error {
-	var log = log.WithField("snap", snap.Name)
+	log := log.WithField("snap", snap.Name)
 	log.Info("pushing snap")
 	// TODO: customize --release based on snap.Grade?
 	/* #nosec */
-	var cmd = exec.CommandContext(ctx, "snapcraft", "upload", "--release=stable", snap.Path)
+	cmd := exec.CommandContext(ctx, "snapcraft", "upload", "--release=stable", snap.Path)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		if strings.Contains(string(out), reviewWaitMsg) {
+		if strings.Contains(string(out), reviewWaitMsg) || strings.Contains(string(out), humanReviewMsg) || strings.Contains(string(out), needsReviewMsg) {
 			log.Warn(reviewWaitMsg)
 		} else {
 			return fmt.Errorf("failed to push %s package: %s", snap.Path, string(out))
@@ -344,7 +365,7 @@ func link(src, dest string, mode os.FileMode) error {
 		// - dest = "dist/linuxamd64/b"
 		// - path = "a/b/c.txt"
 		// So we join "a/b" with "c.txt" and use it as the destination.
-		var dst = filepath.Join(dest, strings.Replace(path, src, "", 1))
+		dst := filepath.Join(dest, strings.Replace(path, src, "", 1))
 		log.WithFields(log.Fields{
 			"src": path,
 			"dst": dst,

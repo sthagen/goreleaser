@@ -14,6 +14,9 @@ var ErrSnapshotEnabled = Skip("disabled during snapshot mode")
 // It means that the part of a Piper that publishes its artifacts was not run.
 var ErrSkipPublishEnabled = Skip("publishing is disabled")
 
+// ErrSkipAnnounceEnabled happens if --skip-announce is set.
+var ErrSkipAnnounceEnabled = Skip("announcing is disabled")
+
 // ErrSkipSignEnabled happens if --skip-sign is set.
 // It means that the part of a Piper that signs some things was not run.
 var ErrSkipSignEnabled = Skip("artifact signing is disabled")
@@ -22,14 +25,31 @@ var ErrSkipSignEnabled = Skip("artifact signing is disabled")
 // It means that the part of a Piper that validates some things was not run.
 var ErrSkipValidateEnabled = Skip("validation is disabled")
 
+// ErrSkipDisabledPipe happens when a pipe is skipped because it is not configured.
+var ErrSkipDisabledPipe = ErrSkip{
+	reason:   "pipe not configured/disabled",
+	expected: true,
+}
+
 // IsSkip returns true if the error is an ErrSkip.
 func IsSkip(err error) bool {
 	return errors.As(err, &ErrSkip{})
 }
 
+// IsExpectedSkip returns true if the given error is ErrSkip and if it is an
+// expected skip.
+func IsExpectedSkip(err error) bool {
+	skipErr := ErrSkip{}
+	if !errors.As(err, &skipErr) {
+		return false
+	}
+	return skipErr.expected
+}
+
 // ErrSkip occurs when a pipe is skipped for some reason.
 type ErrSkip struct {
-	reason string
+	reason   string
+	expected bool
 }
 
 // Error implements the error interface. returns the reason the pipe was skipped.

@@ -13,7 +13,7 @@ the commented example below:
 scoop:
   # Template for the url which is determined by the given Token (github or gitlab)
   # Default for github is "https://github.com/<repo_owner>/<repo_name>/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
-  # Default for gitlab is "https://gitlab.com/<repo_owner>/<repo_name>/uploads/{{ .ArtifactUploadHash }}/{{ .ArtifactName }}"
+  # Default for gitlab is "https://gitlab.com/<repo_owner>/<repo_name>/-/releases/{{ .Tag }}/downloads/{{ .ArtifactName }}"
   # Default for gitea is "https://gitea.com/<repo_owner>/<repo_name>/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
   url_template: "http://github.mycompany.com/foo/bar/releases/{{ .Tag }}/{{ .ArtifactName }}"
 
@@ -23,6 +23,10 @@ scoop:
     name: scoop-bucket
     # Optionally a token can be provided, if it differs from the token provided to GoReleaser
     token: "{{ .Env.SCOOP_BUCKET_GITHUB_TOKEN }}"
+
+  # Folder inside the repository to put the scoop.
+  # Default is the root folder.
+  folder: Scoops
 
   # Git author used to commit to the repository.
   # Defaults are shown.
@@ -44,6 +48,13 @@ scoop:
   # Your app's license
   # Default is empty.
   license: MIT
+
+  # Setting this will prevent goreleaser to actually try to commit the updated
+  # manifest leaving the responsibility of publishing it to the user.
+  # If set to auto, the release will not be uploaded to the scoop bucket
+  # in case there is an indicator for prerelease in the tag e.g. v1.0.0-rc1
+  # Default is false.
+  skip_upload: true
 
   # Persist data between application updates
   persist:

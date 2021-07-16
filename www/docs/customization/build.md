@@ -24,8 +24,10 @@ builds:
     dir: go
 
     # Path to main.go file or main package.
+    # Notice: when used with `gomod.proxy`, this must be a package.
+    #
     # Default is `.`.
-    main: ./cmd/main.go
+    main: ./cmd/my-app
 
     # Binary name.
     # Can be a path (e.g. `bin/app`) to wrap the binary in a directory.
@@ -53,8 +55,16 @@ builds:
     # Custom ldflags templates.
     # Default is `-s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}} -X main.builtBy=goreleaser`.
     ldflags:
-     - -s -w -X main.build={{.Version}}
-     - ./usemsan=-msan
+      - -s -w -X main.build={{.Version}}
+      - ./usemsan=-msan
+
+    # Custom build tags templates.
+    # Default is empty.
+    tags:
+      - osusergo
+      - netgo
+      - static_build
+      - feature
 
     # Custom environment variables to be set during the builds.
     # Default is empty.
@@ -85,7 +95,7 @@ builds:
 
     # GOMIPS and GOMIPS64 to build when GOARCH is mips, mips64, mipsle or mips64le.
     # For more info refer to: https://golang.org/doc/install/source#environment
-    # Default is empty.
+    # Default is only hardfloat.
     gomips:
       - hardfloat
       - softfloat
@@ -124,6 +134,15 @@ builds:
     # Useful for library projects.
     # Default is false
     skip: false
+
+    # By default, GoRelaser will create your binaries inside `dist/${BuildID}_${BuildTarget}`, which is an unique directory per build target in the matrix.
+    # You are able to set subdirs within that folder using the `binary` property.
+    #
+    # However, if for some reason you don't want that unique directory to be created, you can set this property.
+    # If you do, you are responsible of keeping different builds from overriding each other.
+    #
+    # Defaults to `false`.
+    no_unique_dist_dir: true
 ```
 
 !!! tip
@@ -134,7 +153,7 @@ Here is an example with multiple binaries:
 ```yaml
 # .goreleaser.yml
 builds:
-  - main: ./cmd/cli/cli.go
+  - main: ./cmd/cli
     id: "cli"
     binary: cli
     goos:
@@ -142,7 +161,7 @@ builds:
       - darwin
       - windows
 
-  - main: ./cmd/worker/worker.go
+  - main: ./cmd/worker
     id: "worker"
     binary: worker
     goos:
@@ -150,7 +169,7 @@ builds:
       - darwin
       - windows
 
-  - main: ./cmd/tracker/tracker.go
+  - main: ./cmd/tracker
     id: "tracker"
     binary: tracker
     goos:
@@ -252,13 +271,13 @@ Environment variables are inherited and overridden in the following order:
  try to download the dependencies. Since several builds run in parallel, it is
  very likely to fail.
 
- You can solve this by running `go mod download` before calling `goreleaser` or
+ You can solve this by running `go mod tidy` before calling `goreleaser` or
  by adding a [hook][] doing that on your `.goreleaser.yml` file:
 
  ```yaml
  before:
    hooks:
-   - go mod download
+   - go mod tidy
  # rest of the file...
  ```
 

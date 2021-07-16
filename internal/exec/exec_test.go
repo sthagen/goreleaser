@@ -2,7 +2,7 @@ package exec
 
 import (
 	"fmt"
-	"io/ioutil"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -29,7 +29,7 @@ func TestExecute(t *testing.T) {
 
 	// Preload artifacts
 	ctx.Artifacts = artifact.New()
-	var folder = t.TempDir()
+	folder := t.TempDir()
 	for _, a := range []struct {
 		id  string
 		ext string
@@ -43,8 +43,8 @@ func TestExecute(t *testing.T) {
 		{"checksum", "sum", artifact.Checksum},
 		{"signature", "sig", artifact.Signature},
 	} {
-		var file = filepath.Join(folder, "a."+a.ext)
-		require.NoError(t, ioutil.WriteFile(file, []byte("lorem ipsum"), 0644))
+		file := filepath.Join(folder, "a."+a.ext)
+		require.NoError(t, os.WriteFile(file, []byte("lorem ipsum"), 0o644))
 		ctx.Artifacts.Add(&artifact.Artifact{
 			Name:   "a." + a.ext,
 			Goos:   "linux",
@@ -55,6 +55,22 @@ func TestExecute(t *testing.T) {
 				"ID": a.id,
 			},
 		})
+	}
+
+	osEnv := func(ignores ...string) []string {
+		var result []string
+	outer:
+		for _, key := range passthroughEnvVars {
+			for _, ignore := range ignores {
+				if key == ignore {
+					continue outer
+				}
+			}
+			if value := os.Getenv(key); value != "" {
+				result = append(result, key+"="+value)
+			}
+		}
+		return result
 	}
 
 	testCases := []struct {
@@ -72,7 +88,7 @@ func TestExecute(t *testing.T) {
 					Env: []string{
 						MarshalMockEnv(&MockData{
 							AnyOf: []MockCall{
-								{ExpectedArgs: []string{"a.tar"}, ExitCode: 0},
+								{ExpectedArgs: []string{"a.tar"}, ExitCode: 0, ExpectedEnv: osEnv()},
 							},
 						}),
 					},
@@ -89,9 +105,9 @@ func TestExecute(t *testing.T) {
 					Env: []string{
 						MarshalMockEnv(&MockData{
 							AnyOf: []MockCall{
-								{ExpectedArgs: []string{"a.deb"}, ExitCode: 0},
-								{ExpectedArgs: []string{"a.ubi"}, ExitCode: 0},
-								{ExpectedArgs: []string{"a.tar"}, ExitCode: 0},
+								{ExpectedArgs: []string{"a.deb"}, ExitCode: 0, ExpectedEnv: osEnv()},
+								{ExpectedArgs: []string{"a.ubi"}, ExitCode: 0, ExpectedEnv: osEnv()},
+								{ExpectedArgs: []string{"a.tar"}, ExitCode: 0, ExpectedEnv: osEnv()},
 							},
 						}),
 					},
@@ -109,10 +125,10 @@ func TestExecute(t *testing.T) {
 					Env: []string{
 						MarshalMockEnv(&MockData{
 							AnyOf: []MockCall{
-								{ExpectedArgs: []string{"a.deb"}, ExitCode: 0},
-								{ExpectedArgs: []string{"a.ubi"}, ExitCode: 0},
-								{ExpectedArgs: []string{"a.tar"}, ExitCode: 0},
-								{ExpectedArgs: []string{"a.sum"}, ExitCode: 0},
+								{ExpectedArgs: []string{"a.deb"}, ExitCode: 0, ExpectedEnv: osEnv()},
+								{ExpectedArgs: []string{"a.ubi"}, ExitCode: 0, ExpectedEnv: osEnv()},
+								{ExpectedArgs: []string{"a.tar"}, ExitCode: 0, ExpectedEnv: osEnv()},
+								{ExpectedArgs: []string{"a.sum"}, ExitCode: 0, ExpectedEnv: osEnv()},
 							},
 						}),
 					},
@@ -130,10 +146,10 @@ func TestExecute(t *testing.T) {
 					Env: []string{
 						MarshalMockEnv(&MockData{
 							AnyOf: []MockCall{
-								{ExpectedArgs: []string{"a.deb"}, ExitCode: 0},
-								{ExpectedArgs: []string{"a.ubi"}, ExitCode: 0},
-								{ExpectedArgs: []string{"a.tar"}, ExitCode: 0},
-								{ExpectedArgs: []string{"a.sig"}, ExitCode: 0},
+								{ExpectedArgs: []string{"a.deb"}, ExitCode: 0, ExpectedEnv: osEnv()},
+								{ExpectedArgs: []string{"a.ubi"}, ExitCode: 0, ExpectedEnv: osEnv()},
+								{ExpectedArgs: []string{"a.tar"}, ExitCode: 0, ExpectedEnv: osEnv()},
+								{ExpectedArgs: []string{"a.sig"}, ExitCode: 0, ExpectedEnv: osEnv()},
 							},
 						}),
 					},
@@ -153,7 +169,7 @@ func TestExecute(t *testing.T) {
 					Env: []string{
 						MarshalMockEnv(&MockData{
 							AnyOf: []MockCall{
-								{ExpectedArgs: []string{"a.deb"}, ExitCode: 0},
+								{ExpectedArgs: []string{"a.deb"}, ExitCode: 0, ExpectedEnv: osEnv()},
 							},
 						}),
 					},
@@ -175,11 +191,35 @@ func TestExecute(t *testing.T) {
 						MarshalMockEnv(&MockData{
 							AnyOf: []MockCall{
 								{
-									ExpectedEnv: []string{
-										"PROJECT=blah",
-										"ARTIFACT=a.deb",
-										"SECRET=x",
-									},
+									ExpectedEnv: append(
+										[]string{"PROJECT=blah", "ARTIFACT=a.deb", "SECRET=x"},
+										osEnv()...,
+									),
+									ExitCode: 0,
+								},
+							},
+						}),
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"override path",
+			[]config.Publisher{
+				{
+					Name: "test",
+					IDs:  []string{"debpkg"},
+					Cmd:  MockCmd,
+					Env: []string{
+						"PATH=/something-else",
+						MarshalMockEnv(&MockData{
+							AnyOf: []MockCall{
+								{
+									ExpectedEnv: append(
+										[]string{"PATH=/something-else"},
+										osEnv("PATH")...,
+									),
 									ExitCode: 0,
 								},
 							},

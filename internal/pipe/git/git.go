@@ -116,16 +116,27 @@ func validate(ctx *context.Context) error {
 	if ctx.SkipValidate {
 		return pipe.ErrSkipValidateEnabled
 	}
-	out, err := git.Run("status", "--porcelain")
-	if strings.TrimSpace(out) != "" || err != nil {
-		return ErrDirty{status: out}
+	if _, err := os.Stat(".git/shallow"); err == nil {
+		log.Warn("running against a shallow clone - check your CI documentation at https://goreleaser.com/ci")
 	}
-	_, err = git.Clean(git.Run("describe", "--exact-match", "--tags", "--match", ctx.Git.CurrentTag))
+	if err := CheckDirty(); err != nil {
+		return err
+	}
+	_, err := git.Clean(git.Run("describe", "--exact-match", "--tags", "--match", ctx.Git.CurrentTag))
 	if err != nil {
 		return ErrWrongRef{
 			commit: ctx.Git.Commit,
 			tag:    ctx.Git.CurrentTag,
 		}
+	}
+	return nil
+}
+
+// CheckDirty returns an error if the current git repository is dirty.
+func CheckDirty() error {
+	out, err := git.Run("status", "--porcelain")
+	if strings.TrimSpace(out) != "" || err != nil {
+		return ErrDirty{status: out}
 	}
 	return nil
 }

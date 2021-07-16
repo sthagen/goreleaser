@@ -33,7 +33,7 @@ signs:
     # Defaults to "default".
     id: foo
 
-    # name of the signature file.
+    # name/template of the signature file.
     # '${artifact}' is the path to the artifact that should be signed.
     #
     # defaults to `${artifact}.sig`
@@ -55,10 +55,13 @@ signs:
 
     # which artifacts to sign
     #
-    #   checksum: only checksum file(s)
     #   all:      all artifacts
     #   none:     no signing
+    #   checksum: only checksum file(s)
     #   source:   source archive
+    #   package:  linux packages (deb, rpm, apk)
+    #   archive:  archives from archive pipe
+    #   binary:   binaries if archiving format is set to binary
     #
     # defaults to `none`
     artifacts: all

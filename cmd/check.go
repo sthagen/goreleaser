@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/apex/log"
+	"github.com/apex/log/handlers/cli"
 	"github.com/caarlos0/ctrlc"
 	"github.com/fatih/color"
 	"github.com/goreleaser/goreleaser/internal/pipe/defaults"
@@ -14,12 +16,13 @@ import (
 type checkCmd struct {
 	cmd        *cobra.Command
 	config     string
+	quiet      bool
 	deprecated bool
 }
 
 func newCheckCmd() *checkCmd {
-	var root = &checkCmd{}
-	var cmd = &cobra.Command{
+	root := &checkCmd{}
+	cmd := &cobra.Command{
 		Use:           "check",
 		Aliases:       []string{"c"},
 		Short:         "Checks if configuration is valid",
@@ -27,11 +30,15 @@ func newCheckCmd() *checkCmd {
 		SilenceErrors: true,
 		Args:          cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if root.quiet {
+				log.SetHandler(cli.New(io.Discard))
+			}
+
 			cfg, err := loadConfig(root.config)
 			if err != nil {
 				return err
 			}
-			var ctx = context.New(cfg)
+			ctx := context.New(cfg)
 			ctx.Deprecated = root.deprecated
 
 			if err := ctrlc.Default.Run(ctx, func() error {
@@ -55,6 +62,7 @@ func newCheckCmd() *checkCmd {
 	}
 
 	cmd.Flags().StringVarP(&root.config, "config", "f", "", "Configuration file to check")
+	cmd.Flags().BoolVarP(&root.quiet, "quiet", "q", false, "Quiet mode: no output")
 	cmd.Flags().BoolVar(&root.deprecated, "deprecated", false, "Force print the deprecation message - tests only")
 	_ = cmd.Flags().MarkHidden("deprecated")
 

@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/apex/log"
+	"github.com/goreleaser/goreleaser/internal/tmpl"
 	"github.com/goreleaser/goreleaser/pkg/context"
 	homedir "github.com/mitchellh/go-homedir"
 )
@@ -28,7 +30,7 @@ func (Pipe) String() string {
 }
 
 func setDefaultTokenFiles(ctx *context.Context) {
-	var env = &ctx.Config.EnvFiles
+	env := &ctx.Config.EnvFiles
 	if env.GitHubToken == "" {
 		env.GitHubToken = "~/.config/goreleaser/github_token"
 	}
@@ -42,6 +44,19 @@ func setDefaultTokenFiles(ctx *context.Context) {
 
 // Run the pipe.
 func (Pipe) Run(ctx *context.Context) error {
+	templ := tmpl.New(ctx).WithEnvS(os.Environ())
+	for i := range ctx.Config.Env {
+		env, err := templ.Apply(ctx.Config.Env[i])
+		if err != nil {
+			return err
+		}
+		// XXX: this has no risk of panicking because it would already have
+		// panicked at `context.go`'s `splitEnv` method.
+		// Need to properly handle this at some point.
+		parts := strings.SplitN(env, "=", 2)
+		ctx.Env[parts[0]] = parts[1]
+	}
+
 	setDefaultTokenFiles(ctx)
 	githubToken, githubTokenErr := loadEnv("GITHUB_TOKEN", ctx.Config.EnvFiles.GitHubToken)
 	gitlabToken, gitlabTokenErr := loadEnv("GITLAB_TOKEN", ctx.Config.EnvFiles.GitLabToken)
@@ -128,6 +143,7 @@ func loadEnv(env, path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	defer f.Close()
 	bts, _, err := bufio.NewReader(f).ReadLine()
 	return string(bts), err
 }

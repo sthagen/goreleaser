@@ -21,6 +21,9 @@ on:
   pull_request:
   push:
 
+permissions:
+  contents: write
+
 jobs:
   goreleaser:
     runs-on: ubuntu-latest
@@ -39,14 +42,19 @@ jobs:
         name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v2
         with:
+          # either 'goreleaser' (default) or 'goreleaser-pro'
+          distribution: goreleaser
           version: latest
           args: release --rm-dist
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Your GoReleaser Pro key, if you are using the 'goreleaser-pro' distribution
+          # GORELEASER_KEY: ${{ secrets.GORELEASER_KEY }}
 ```
 
-!!! info
-    Note the `fetch-depth: 0` option on the `Checkout` workflow step. It is required for the change log to work correctly.
+!!! warning
+    Note the `fetch-depth: 0` option on the `Checkout` workflow step. It is required for GoReleaser to work properly.
+    Without that, GoReleaser might fail or behave incorrectly.
 
 ### Run on new tag
 
@@ -114,11 +122,13 @@ signs:
 
 Following inputs can be used as `step.with` keys
 
-| Name      | Type   | Default  | Description                               |
-|-----------|--------|----------|-------------------------------------------|
-| `version`¹| String | `latest` | GoReleaser version. Example: `v0.117.0`   |
-| `args`    | String |          | Arguments to pass to GoReleaser           |
-| `workdir` | String | `.`      | Working directory (below repository root) |
+| Name             | Type    | Default      | Description                                                      |
+|------------------|---------|--------------|------------------------------------------------------------------|
+| `distribution`   | String  | `goreleaser` | GoReleaser distribution, either `goreleaser` or `goreleaser-pro` |
+| `version`**¹**   | String  | `latest`     | GoReleaser version                                               |
+| `args`           | String  |              | Arguments to pass to GoReleaser                                  |
+| `workdir`        | String  | `.`          | Working directory (below repository root)                        |
+| `install-only`   | Bool    | `false`      | Just install GoReleaser                                          |
 
 !!! info
     ¹: Can be a fixed version like `v0.117.0` or a max satisfying SemVer one
@@ -128,11 +138,21 @@ Following inputs can be used as `step.with` keys
 
 Following environment variables can be used as `step.env` keys
 
-| Name           | Description                                           |
-|----------------|-------------------------------------------------------|
-| `GITHUB_TOKEN` | [GITHUB_TOKEN][github-token] as provided by `secrets` |
+| Name             | Description                           |
+|------------------|---------------------------------------|
+| `GITHUB_TOKEN`   | [GITHUB_TOKEN](https://help.github.com/en/actions/configuring-and-managing-workflows/authenticating-with-the-github_token) as provided by `secrets` |
+| `GORELEASER_KEY` | Your [GoReleaser Pro](https://goreleaser.com/pro) License Key, in case you are using the `goreleaser-pro` distribution                              |
 
-## Limitations
+## Token Permissions
+
+The following [permissions](https://docs.github.com/en/actions/reference/authentication-in-a-workflow#permissions-for-the-github_token) are required by GoReleaser:
+
+ - `content: write` if you wish to
+    - [upload archives as GitHub Releases](/customization/release/), or
+    - publish to [Homebrew](/customization/homebrew/), or [Scoop](/customization/scoop/) (assuming it's part of the same repository)
+ - or just `content: read` if you don't need any of the above
+ - `packages: write` if you [push Docker images](/customization/docker/) to GitHub
+ - `issues: write` if you use [milestone closing capability](/customization/milestone/)
 
 `GITHUB_TOKEN` permissions [are limited to the repository][about-github-token] that contains your workflow.
 
@@ -150,6 +170,8 @@ create a secret named `GH_PAT`, the step will look like this:
         env:
           GITHUB_TOKEN: ${{ secrets.GH_PAT }}
 ```
+
+You can also read the [GitHub documentation](https://docs.github.com/en/github/authenticating-to-github/creating-a-personal-access-token) about it.
 
 ## How does it look like?
 

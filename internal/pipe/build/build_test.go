@@ -3,7 +3,6 @@ package build
 import (
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"testing"
@@ -17,8 +16,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var errFailedBuild = errors.New("fake builder failed")
-var errFailedDefault = errors.New("fake builder defaults failed")
+var (
+	errFailedBuild   = errors.New("fake builder failed")
+	errFailedDefault = errors.New("fake builder defaults failed")
+)
 
 type fakeBuilder struct {
 	fail        bool
@@ -36,10 +37,10 @@ func (f *fakeBuilder) Build(ctx *context.Context, build config.Build, options ap
 	if f.fail {
 		return errFailedBuild
 	}
-	if err := os.MkdirAll(filepath.Dir(options.Path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(options.Path), 0o755); err != nil {
 		return err
 	}
-	if err := ioutil.WriteFile(options.Path, []byte("foo"), 0755); err != nil {
+	if err := os.WriteFile(options.Path, []byte("foo"), 0o755); err != nil {
 		return err
 	}
 	ctx.Artifacts.Add(&artifact.Artifact{
@@ -63,8 +64,8 @@ func TestPipeDescription(t *testing.T) {
 }
 
 func TestBuild(t *testing.T) {
-	var folder = testlib.Mktmp(t)
-	var config = config.Project{
+	folder := testlib.Mktmp(t)
+	config := config.Project{
 		Dist: folder,
 		Builds: []config.Build{
 			{
@@ -75,7 +76,7 @@ func TestBuild(t *testing.T) {
 			},
 		},
 	}
-	var ctx = &context.Context{
+	ctx := &context.Context{
 		Artifacts: artifact.New(),
 		Git: context.GitInfo{
 			CurrentTag: "v1.2.3",
@@ -91,8 +92,8 @@ func TestBuild(t *testing.T) {
 }
 
 func TestRunPipe(t *testing.T) {
-	var folder = testlib.Mktmp(t)
-	var config = config.Project{
+	folder := testlib.Mktmp(t)
+	config := config.Project{
 		Dist: folder,
 		Builds: []config.Build{
 			{
@@ -104,7 +105,7 @@ func TestRunPipe(t *testing.T) {
 			},
 		},
 	}
-	var ctx = context.New(config)
+	ctx := context.New(config)
 	ctx.Git.CurrentTag = "2.4.5"
 	require.NoError(t, Pipe{}.Run(ctx))
 	require.Equal(t, ctx.Artifacts.List(), []*artifact.Artifact{{
@@ -113,10 +114,10 @@ func TestRunPipe(t *testing.T) {
 }
 
 func TestRunFullPipe(t *testing.T) {
-	var folder = testlib.Mktmp(t)
-	var pre = filepath.Join(folder, "pre")
-	var post = filepath.Join(folder, "post")
-	var config = config.Project{
+	folder := testlib.Mktmp(t)
+	pre := filepath.Join(folder, "pre")
+	post := filepath.Join(folder, "post")
+	config := config.Project{
 		Builds: []config.Build{
 			{
 				ID:      "build1",
@@ -137,8 +138,9 @@ func TestRunFullPipe(t *testing.T) {
 		},
 		Dist: folder,
 	}
-	var ctx = context.New(config)
+	ctx := context.New(config)
 	ctx.Git.CurrentTag = "2.4.5"
+	require.NoError(t, Pipe{}.Default(ctx))
 	require.NoError(t, Pipe{}.Run(ctx))
 	require.Equal(t, ctx.Artifacts.List(), []*artifact.Artifact{{
 		Name: "testing",
@@ -149,10 +151,10 @@ func TestRunFullPipe(t *testing.T) {
 }
 
 func TestRunFullPipeFail(t *testing.T) {
-	var folder = testlib.Mktmp(t)
-	var pre = filepath.Join(folder, "pre")
-	var post = filepath.Join(folder, "post")
-	var config = config.Project{
+	folder := testlib.Mktmp(t)
+	pre := filepath.Join(folder, "pre")
+	post := filepath.Join(folder, "post")
+	config := config.Project{
 		Dist: folder,
 		Builds: []config.Build{
 			{
@@ -172,7 +174,7 @@ func TestRunFullPipeFail(t *testing.T) {
 			},
 		},
 	}
-	var ctx = context.New(config)
+	ctx := context.New(config)
 	ctx.Git.CurrentTag = "2.4.5"
 	require.EqualError(t, Pipe{}.Run(ctx), errFailedBuild.Error())
 	require.Empty(t, ctx.Artifacts.List())
@@ -180,8 +182,8 @@ func TestRunFullPipeFail(t *testing.T) {
 }
 
 func TestRunPipeFailingHooks(t *testing.T) {
-	var folder = testlib.Mktmp(t)
-	var cfg = config.Project{
+	folder := testlib.Mktmp(t)
+	cfg := config.Project{
 		Dist: folder,
 		Builds: []config.Build{
 			{
@@ -193,14 +195,14 @@ func TestRunPipeFailingHooks(t *testing.T) {
 		},
 	}
 	t.Run("pre-hook", func(t *testing.T) {
-		var ctx = context.New(cfg)
+		ctx := context.New(cfg)
 		ctx.Git.CurrentTag = "2.3.4"
 		ctx.Config.Builds[0].Hooks.Pre = []config.BuildHook{{Cmd: "exit 1"}}
 		ctx.Config.Builds[0].Hooks.Post = []config.BuildHook{{Cmd: "echo post"}}
 		require.EqualError(t, Pipe{}.Run(ctx), `pre hook failed: "": exec: "exit": executable file not found in $PATH`)
 	})
 	t.Run("post-hook", func(t *testing.T) {
-		var ctx = context.New(cfg)
+		ctx := context.New(cfg)
 		ctx.Git.CurrentTag = "2.3.4"
 		ctx.Config.Builds[0].Hooks.Pre = []config.BuildHook{{Cmd: "echo pre"}}
 		ctx.Config.Builds[0].Hooks.Post = []config.BuildHook{{Cmd: "exit 1"}}
@@ -209,15 +211,15 @@ func TestRunPipeFailingHooks(t *testing.T) {
 }
 
 func TestDefaultNoBuilds(t *testing.T) {
-	var ctx = &context.Context{
+	ctx := &context.Context{
 		Config: config.Project{},
 	}
 	require.NoError(t, Pipe{}.Default(ctx))
 }
 
 func TestDefaultFail(t *testing.T) {
-	var folder = testlib.Mktmp(t)
-	var config = config.Project{
+	folder := testlib.Mktmp(t)
+	config := config.Project{
 		Dist: folder,
 		Builds: []config.Build{
 			{
@@ -225,14 +227,14 @@ func TestDefaultFail(t *testing.T) {
 			},
 		},
 	}
-	var ctx = context.New(config)
+	ctx := context.New(config)
 	require.EqualError(t, Pipe{}.Default(ctx), errFailedDefault.Error())
 	require.Empty(t, ctx.Artifacts.List())
 }
 
 func TestDefaultExpandEnv(t *testing.T) {
 	require.NoError(t, os.Setenv("XBAR", "FOOBAR"))
-	var ctx = &context.Context{
+	ctx := &context.Context{
 		Config: config.Project{
 			Builds: []config.Build{
 				{
@@ -244,12 +246,12 @@ func TestDefaultExpandEnv(t *testing.T) {
 		},
 	}
 	require.NoError(t, Pipe{}.Default(ctx))
-	var env = ctx.Config.Builds[0].Env[0]
+	env := ctx.Config.Builds[0].Env[0]
 	require.Equal(t, "XFOO=bar_FOOBAR", env)
 }
 
 func TestDefaultEmptyBuild(t *testing.T) {
-	var ctx = &context.Context{
+	ctx := &context.Context{
 		Config: config.Project{
 			ProjectName: "foo",
 			Builds: []config.Build{
@@ -258,7 +260,7 @@ func TestDefaultEmptyBuild(t *testing.T) {
 		},
 	}
 	require.NoError(t, Pipe{}.Default(ctx))
-	var build = ctx.Config.Builds[0]
+	build := ctx.Config.Builds[0]
 	require.Equal(t, ctx.Config.ProjectName, build.ID)
 	require.Equal(t, ctx.Config.ProjectName, build.Binary)
 	require.Equal(t, ".", build.Dir)
@@ -266,12 +268,13 @@ func TestDefaultEmptyBuild(t *testing.T) {
 	require.Equal(t, []string{"linux", "darwin"}, build.Goos)
 	require.Equal(t, []string{"amd64", "arm64", "386"}, build.Goarch)
 	require.Equal(t, []string{"6"}, build.Goarm)
+	require.Equal(t, []string{"hardfloat"}, build.Gomips)
 	require.Len(t, build.Ldflags, 1)
 	require.Equal(t, "-s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}} -X main.builtBy=goreleaser", build.Ldflags[0])
 }
 
 func TestDefaultBuildID(t *testing.T) {
-	var ctx = &context.Context{
+	ctx := &context.Context{
 		Config: config.Project{
 			ProjectName: "foo",
 			Builds: []config.Build{
@@ -285,12 +288,12 @@ func TestDefaultBuildID(t *testing.T) {
 		},
 	}
 	require.EqualError(t, Pipe{}.Default(ctx), "found 2 builds with the ID 'foo', please fix your config")
-	var build = ctx.Config.Builds[0]
+	build := ctx.Config.Builds[0]
 	require.Equal(t, ctx.Config.ProjectName, build.ID)
 }
 
 func TestSeveralBuildsWithTheSameID(t *testing.T) {
-	var ctx = &context.Context{
+	ctx := &context.Context{
 		Config: config.Project{
 			Builds: []config.Build{
 				{
@@ -308,7 +311,7 @@ func TestSeveralBuildsWithTheSameID(t *testing.T) {
 }
 
 func TestDefaultPartialBuilds(t *testing.T) {
-	var ctx = &context.Context{
+	ctx := &context.Context{
 		Config: config.Project{
 			Builds: []config.Build{
 				{
@@ -329,7 +332,7 @@ func TestDefaultPartialBuilds(t *testing.T) {
 	}
 	require.NoError(t, Pipe{}.Default(ctx))
 	t.Run("build0", func(t *testing.T) {
-		var build = ctx.Config.Builds[0]
+		build := ctx.Config.Builds[0]
 		require.Equal(t, "bar", build.Binary)
 		require.Equal(t, ".", build.Dir)
 		require.Equal(t, "./cmd/main.go", build.Main)
@@ -340,7 +343,7 @@ func TestDefaultPartialBuilds(t *testing.T) {
 		require.Equal(t, "-s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}} -X main.builtBy=goreleaser", build.Ldflags[0])
 	})
 	t.Run("build1", func(t *testing.T) {
-		var build = ctx.Config.Builds[1]
+		build := ctx.Config.Builds[1]
 		require.Equal(t, "foo", build.Binary)
 		require.Equal(t, ".", build.Main)
 		require.Equal(t, "baz", build.Dir)
@@ -355,7 +358,7 @@ func TestDefaultPartialBuilds(t *testing.T) {
 func TestDefaultFillSingleBuild(t *testing.T) {
 	testlib.Mktmp(t)
 
-	var ctx = &context.Context{
+	ctx := &context.Context{
 		Config: config.Project{
 			ProjectName: "foo",
 			SingleBuild: config.Build{
@@ -369,21 +372,21 @@ func TestDefaultFillSingleBuild(t *testing.T) {
 }
 
 func TestDefaultFailSingleBuild(t *testing.T) {
-	var folder = testlib.Mktmp(t)
-	var config = config.Project{
+	folder := testlib.Mktmp(t)
+	config := config.Project{
 		Dist: folder,
 		SingleBuild: config.Build{
 			Lang: "fakeFailDefault",
 		},
 	}
-	var ctx = context.New(config)
+	ctx := context.New(config)
 	require.EqualError(t, Pipe{}.Default(ctx), errFailedDefault.Error())
 	require.Empty(t, ctx.Artifacts.List())
 }
 
 func TestSkipBuild(t *testing.T) {
-	var folder = testlib.Mktmp(t)
-	var config = config.Project{
+	folder := testlib.Mktmp(t)
+	config := config.Project{
 		Dist: folder,
 		Builds: []config.Build{
 			{
@@ -391,7 +394,7 @@ func TestSkipBuild(t *testing.T) {
 			},
 		},
 	}
-	var ctx = context.New(config)
+	ctx := context.New(config)
 	ctx.Git.CurrentTag = "2.4.5"
 	require.NoError(t, Pipe{}.Run(ctx))
 	require.Len(t, ctx.Artifacts.List(), 0)
@@ -418,7 +421,7 @@ func TestExtOthers(t *testing.T) {
 }
 
 func TestTemplate(t *testing.T) {
-	var ctx = context.New(config.Project{})
+	ctx := context.New(config.Project{})
 	ctx.Git = context.GitInfo{
 		CurrentTag: "v1.2.3",
 		Commit:     "123",
@@ -437,16 +440,16 @@ func TestTemplate(t *testing.T) {
 }
 
 func TestRunHookEnvs(t *testing.T) {
-	var tmp = testlib.Mktmp(t)
+	tmp := testlib.Mktmp(t)
 
-	var build = config.Build{
+	build := config.Build{
 		Env: []string{
 			fmt.Sprintf("FOO=%s/foo", tmp),
 			fmt.Sprintf("BAR=%s/bar", tmp),
 		},
 	}
 
-	var opts = api.Options{
+	opts := api.Options{
 		Name:   "binary-name",
 		Path:   "./binary-name",
 		Target: "darwin_amd64",
@@ -457,7 +460,7 @@ func TestRunHookEnvs(t *testing.T) {
 	}
 
 	t.Run("valid cmd template with ctx env", func(t *testing.T) {
-		var err = runHook(context.New(config.Project{
+		err := runHook(context.New(config.Project{
 			Builds: []config.Build{
 				build,
 			},
@@ -470,7 +473,7 @@ func TestRunHookEnvs(t *testing.T) {
 	})
 
 	t.Run("valid cmd template with build env", func(t *testing.T) {
-		var err = runHook(context.New(config.Project{
+		err := runHook(context.New(config.Project{
 			Builds: []config.Build{
 				build,
 			},
@@ -480,7 +483,7 @@ func TestRunHookEnvs(t *testing.T) {
 	})
 
 	t.Run("valid cmd template with hook env", func(t *testing.T) {
-		var err = runHook(context.New(config.Project{
+		err := runHook(context.New(config.Project{
 			Builds: []config.Build{
 				build,
 			},
@@ -495,7 +498,7 @@ func TestRunHookEnvs(t *testing.T) {
 	})
 
 	t.Run("valid cmd template with ctx and build env", func(t *testing.T) {
-		var err = runHook(context.New(config.Project{
+		err := runHook(context.New(config.Project{
 			Builds: []config.Build{
 				build,
 			},
@@ -512,7 +515,7 @@ func TestRunHookEnvs(t *testing.T) {
 	})
 
 	t.Run("valid cmd template with ctx and hook env", func(t *testing.T) {
-		var err = runHook(context.New(config.Project{
+		err := runHook(context.New(config.Project{
 			Builds: []config.Build{
 				build,
 			},
@@ -531,7 +534,7 @@ func TestRunHookEnvs(t *testing.T) {
 	})
 
 	t.Run("valid cmd template with build and hook env", func(t *testing.T) {
-		var err = runHook(context.New(config.Project{
+		err := runHook(context.New(config.Project{
 			Builds: []config.Build{
 				build,
 			},
@@ -549,7 +552,7 @@ func TestRunHookEnvs(t *testing.T) {
 	})
 
 	t.Run("valid cmd template with ctx, build and hook env", func(t *testing.T) {
-		var err = runHook(context.New(config.Project{
+		err := runHook(context.New(config.Project{
 			Builds: []config.Build{
 				build,
 			},
@@ -571,7 +574,7 @@ func TestRunHookEnvs(t *testing.T) {
 	})
 
 	t.Run("invalid cmd template", func(t *testing.T) {
-		var err = runHook(context.New(config.Project{
+		err := runHook(context.New(config.Project{
 			Builds: []config.Build{
 				build,
 			},
@@ -580,7 +583,7 @@ func TestRunHookEnvs(t *testing.T) {
 	})
 
 	t.Run("invalid dir template", func(t *testing.T) {
-		var err = runHook(context.New(config.Project{
+		err := runHook(context.New(config.Project{
 			Builds: []config.Build{
 				build,
 			},
@@ -592,7 +595,7 @@ func TestRunHookEnvs(t *testing.T) {
 	})
 
 	t.Run("invalid hook env template", func(t *testing.T) {
-		var err = runHook(context.New(config.Project{
+		err := runHook(context.New(config.Project{
 			Builds: []config.Build{
 				build,
 			},
@@ -606,9 +609,9 @@ func TestRunHookEnvs(t *testing.T) {
 	})
 
 	t.Run("build env inside shell", func(t *testing.T) {
-		var shell = `#!/bin/sh -e
+		shell := `#!/bin/sh -e
 touch "$BAR"`
-		err := ioutil.WriteFile(filepath.Join(tmp, "test.sh"), []byte(shell), 0750)
+		err := os.WriteFile(filepath.Join(tmp, "test.sh"), []byte(shell), 0o750)
 		require.NoError(t, err)
 		err = runHook(context.New(config.Project{
 			Builds: []config.Build{
@@ -621,7 +624,7 @@ touch "$BAR"`
 }
 
 func TestBuild_hooksKnowGoosGoarch(t *testing.T) {
-	var tmpDir = testlib.Mktmp(t)
+	tmpDir := testlib.Mktmp(t)
 	build := config.Build{
 		Lang:   "fake",
 		Goarch: []string{"amd64"},
@@ -652,7 +655,7 @@ func TestBuild_hooksKnowGoosGoarch(t *testing.T) {
 }
 
 func TestPipeOnBuild_hooksRunPerTarget(t *testing.T) {
-	var tmpDir = testlib.Mktmp(t)
+	tmpDir := testlib.Mktmp(t)
 
 	build := config.Build{
 		Lang:   "fake",
@@ -704,12 +707,13 @@ func TestPipeOnBuild_invalidBinaryTpl(t *testing.T) {
 }
 
 func TestBuildOptionsForTarget(t *testing.T) {
-	var tmpDir = testlib.Mktmp(t)
+	tmpDir := testlib.Mktmp(t)
 
 	testCases := []struct {
-		name  string
-		build config.Build
+		name         string
+		build        config.Build
 		expectedOpts *api.Options
+		expectedErr  string
 	}{
 		{
 			name: "simple options for target",
@@ -745,6 +749,24 @@ func TestBuildOptionsForTarget(t *testing.T) {
 				Arch:   "amd64",
 			},
 		},
+		{
+			name: "overriding dist path",
+			build: config.Build{
+				ID:     "testid",
+				Binary: "distpath/{{.Os}}/{{.Arch}}/testbinary_{{.Os}}_{{.Arch}}",
+				Targets: []string{
+					"linux_amd64",
+				},
+				NoUniqueDistDir: true,
+			},
+			expectedOpts: &api.Options{
+				Name:   "distpath/linux/amd64/testbinary_linux_amd64",
+				Path:   filepath.Join(tmpDir, "distpath", "linux", "amd64", "testbinary_linux_amd64"),
+				Target: "linux_amd64",
+				Os:     "linux",
+				Arch:   "amd64",
+			},
+		},
 	}
 
 	for _, tc := range testCases {
@@ -753,15 +775,20 @@ func TestBuildOptionsForTarget(t *testing.T) {
 				Dist:   tmpDir,
 				Builds: []config.Build{tc.build},
 			})
-			opts, err := buildOptionsForTarget(ctx, tc.build, tc.build.Targets[0])
-			require.NoError(t, err)
-			require.Equal(t, tc.expectedOpts, opts)
+			require.NoError(t, Pipe{}.Default(ctx))
+			opts, err := buildOptionsForTarget(ctx, ctx.Config.Builds[0], ctx.Config.Builds[0].Targets[0])
+			if tc.expectedErr == "" {
+				require.NoError(t, err)
+				require.Equal(t, tc.expectedOpts, opts)
+			} else {
+				require.EqualError(t, err, tc.expectedErr)
+			}
 		})
 	}
 }
 
 func TestHookComplex(t *testing.T) {
-	var tmp = testlib.Mktmp(t)
+	tmp := testlib.Mktmp(t)
 
 	require.NoError(t, runHook(context.New(config.Project{}), api.Options{}, []string{}, config.BuildHooks{
 		{
@@ -785,8 +812,8 @@ func TestHookInvalidShelCommand(t *testing.T) {
 }
 
 func TestRunHookFailWithLogs(t *testing.T) {
-	var folder = testlib.Mktmp(t)
-	var config = config.Project{
+	folder := testlib.Mktmp(t)
+	config := config.Project{
 		Dist: folder,
 		Builds: []config.Build{
 			{
@@ -802,7 +829,7 @@ func TestRunHookFailWithLogs(t *testing.T) {
 			},
 		},
 	}
-	var ctx = context.New(config)
+	ctx := context.New(config)
 	ctx.Git.CurrentTag = "2.4.5"
 	require.EqualError(t, Pipe{}.Run(ctx), "pre hook failed: \"foo\\n\": exit status 1")
 	require.Empty(t, ctx.Artifacts.List())
